@@ -24,9 +24,9 @@ Development progress by phase. Completed tasks are marked with `[x]`.
 
 ---
 
-## 🔲 Phase 1b — PostgreSQL Support (Optional Backend)
+## ⏸ Phase 1b — PostgreSQL Support (Optional Backend) — DEFERRED
 
-> SQLite is the default and sufficient for most deployments. This phase adds an optional PostgreSQL backend available to **both editions**. Users who want it must run a migration command.
+> Deferred intentionally. SQLite covers all current use cases. PostgreSQL can be added in isolation at any point without touching the rest of the codebase — the `Store` interface already abstracts the backend completely.
 
 - [ ] Define a build-time interface selector: if `database.dsn` is set (or `METALWAF_DB_DSN`), use PostgreSQL; otherwise use SQLite
 - [ ] `internal/database/postgres/store.go` — PostgreSQL implementation of the `Store` interface (`pgx/v5` driver)
@@ -39,55 +39,56 @@ Development progress by phase. Completed tasks are marked with `[x]`.
 
 ---
 
-## 🔲 Phase 2 — HTTP/HTTPS Reverse Proxy + Virtual Hosting
+## ✅ Phase 2 — HTTP/HTTPS Reverse Proxy + Virtual Hosting (DONE)
 
-- [ ] `internal/proxy/upstream.go` — `UpstreamPool` struct with backend list and periodic health checks
-- [ ] `internal/proxy/proxy.go` — core reverse proxy using `net/http/httputil.ReverseProxy`; route by `Host` header to the site's upstream pool
-- [ ] `internal/proxy/rewrite.go` — header rewriting: add `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto`; strip sensitive upstream headers
-- [ ] WebSocket support (`Upgrade: websocket`) in the proxy
-- [ ] `internal/proxy/ratelimit.go` — per-IP rate limiter using token bucket (`golang.org/x/time/rate`); configurable limits per site
-- [ ] HTTP listener on `:80`
-- [ ] HTTPS listener on `:443` (minimal TLS config to allow startup without a cert, extended in Phase 5)
-- [ ] Virtual hosting: load enabled sites from DB on startup and on config changes
-- [ ] `https_only` mode: automatic HTTP → HTTPS redirect when enabled on a site
-- [ ] Upstream health checks: mark as `down` after N consecutive failures, recover automatically
-- [ ] Unit tests for proxy core and header rewriter
-
----
-
-## 🔲 Phase 3 — WAF Engine
-
-- [ ] `internal/waf/engine.go` — HTTP middleware that intercepts every request before forwarding to the proxy
-- [ ] `internal/waf/analyzer.go` — request field extraction: URI, query string, headers, body (with size limit), IP, User-Agent
-- [ ] `internal/waf/signatures/sqli.go` — SQL Injection signatures (basic patterns + ported OWASP CRS regexes)
-- [ ] `internal/waf/signatures/xss.go` — Cross-Site Scripting signatures
-- [ ] `internal/waf/signatures/rce.go` — Remote Code Execution / Command Injection signatures
-- [ ] `internal/waf/signatures/traversal.go` — Path Traversal / Local File Inclusion signatures
-- [ ] `internal/waf/signatures/scanner.go` — known scanner detection (Nmap, Nikto, sqlmap, etc.) by User-Agent and request patterns
-- [ ] `internal/waf/rules/loader.go` — load custom rules from DB on startup; live reload without restart
-- [ ] `internal/waf/rules/owasp.go` — basic embedded OWASP CRS ruleset
-- [ ] Anomaly scoring system: accumulate score per request; block if it exceeds the configurable threshold
-- [ ] Per-site modes: `off` / `detect` / `block`
-- [ ] 403 response with customizable HTML body on block
-- [ ] Unit tests per signature + end-to-end integration tests
+- [x] `internal/proxy/upstream.go` — `UpstreamPool` struct with backend list and periodic health checks
+- [x] `internal/proxy/proxy.go` — core reverse proxy using `net/http/httputil.ReverseProxy`; route by `Host` header to the site's upstream pool
+- [x] `internal/proxy/rewrite.go` — header rewriting: add `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto`; strip sensitive upstream headers
+- [x] WebSocket support (`Upgrade: websocket`) in the proxy — handled automatically by `httputil.ReverseProxy` since Go 1.12
+- [x] `internal/proxy/ratelimit.go` — per-IP rate limiter using token bucket (`golang.org/x/time/rate`)
+- [x] HTTP listener on `:80`
+- [x] HTTPS listener on `:443` (self-signed certificate at startup; Phase 5 replaces it with the certificate manager)
+- [x] Virtual hosting: load enabled sites from DB on startup; `Handler.Reload()` for live updates (Phase 4 API)
+- [x] `https_only` mode: automatic HTTP → HTTPS 301 redirect when enabled on a site
+- [x] Upstream health checks: mark as `down` after 3 consecutive HEAD probe failures, recover automatically
+- [x] Unit tests for proxy core and header rewriter (13 tests, all passing)
 
 ---
 
-## 🔲 Phase 4 — Authentication + REST API
+## ✅ Phase 3 — WAF Engine
 
-- [ ] `internal/auth/jwt.go` — generate and validate access tokens (15 min) and refresh tokens (7 days) with `golang-jwt/jwt/v5`
-- [ ] `internal/auth/handler.go` — handlers: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
-- [ ] `internal/auth/middleware.go` — middleware that validates the Bearer token on protected API routes
-- [ ] 2FA TOTP: activation, QR generation, verification during login
-- [ ] `internal/api/router.go` — API router setup under `/api/v1/`
-- [ ] `internal/api/sites.go` — sites and upstreams CRUD (`GET/POST/PUT/DELETE /api/v1/sites`)
-- [ ] `internal/api/rules.go` — WAF rules CRUD (`GET/POST/PUT/DELETE /api/v1/rules`)
-- [ ] `internal/api/certificates.go` — certificate management (`GET/POST/DELETE /api/v1/certificates`)
-- [ ] `internal/api/analytics.go` — logs and metrics (`GET /api/v1/logs`, `GET /api/v1/metrics`)
-- [ ] `internal/api/settings.go` — global system settings
-- [ ] Consistent JSON responses: `{"data":..., "error":...}` envelope
-- [ ] API-level rate limiting to prevent brute force on the login endpoint
-- [ ] API handler tests
+- [x] `internal/waf/engine.go` — anomaly-scoring inspection engine (ActionBlock + ActionDetect + ActionAllow)
+- [x] `internal/waf/analyzer.go` — request field extraction: URI, query (URL-decoded), body (512 KB with restore), IP, User-Agent, headers
+- [x] `internal/waf/signatures_sqli.go` — 12 patterns × 3 fields = 36 rules (UNION SELECT, SLEEP, DDL, xp_cmdshell, …)
+- [x] `internal/waf/signatures_xss.go` — 11 patterns × 3 fields = 33 rules (<script>, javascript:, event handlers, …)
+- [x] `internal/waf/signatures_rce.go` — 8 patterns × 3 fields = 24 rules (shell_exec, $(), backtick, SSTI, …)
+- [x] `internal/waf/signatures_traversal.go` — 7 patterns × 2 fields = 14 rules (../,  %2f, null byte, sensitive paths, …)
+- [x] `internal/waf/signatures_scanner.go` — 14 User-Agent rules (sqlmap, nikto, nmap, nuclei, burp, …)
+- [x] `internal/waf/rule.go` — Rule type, constants (Field/Operator/Action/Category), FromDB converter
+- [x] Anomaly scoring: ActionBlock = instant block; ActionDetect = accumulate score; blocks at threshold (default 100)
+- [x] Per-site modes: `off` / `detect` / `block`
+- [x] 403 HTML response (dark theme) returned on block via `waf.WriteBlocked()`
+- [x] `internal/waf/engine_test.go` — 15 tests covering all categories, modes, allow override, body restore
+- [x] `internal/proxy/proxy.go` — WAF wired into ServeHTTP: inspect after HTTPS redirect, before upstream selection
+- [x] `cmd/metalwaf/main.go` — WAF engine initialized before servers start, rules loaded from DB
+
+---
+
+## ✅ Phase 4 — Authentication + REST API (DONE)
+
+- [x] `internal/auth/jwt.go` — `Issuer`, `Claims`, `TokenPair`; HS256 access tokens (15 min) + refresh tokens (7 days); algorithm pinning prevents alg:none confusion attacks
+- [x] `internal/auth/totp.go` — RFC 6238 TOTP inline (no external dependency): `GenerateTOTPSecret`, `TOTPUri`, `ValidateTOTP`, ±1-period clock window
+- [x] `internal/auth/middleware.go` — `Issuer.RequireAuth` / `Issuer.RequireAdmin` HTTP middleware; claims injected into request context; `ClaimsFromCtx` helper
+- [x] `internal/auth/handler.go` — `POST /api/v1/auth/login` (per-IP rate limit, timing-safe username enumeration prevention), `POST /api/v1/auth/refresh` (token rotation + replay detection), `POST /api/v1/auth/logout`, `POST /api/v1/auth/logout-all`, TOTP setup/verify/disable
+- [x] `internal/api/respond.go` — consistent `{"data":...}` / `{"error":"..."}` JSON envelope
+- [x] `internal/api/router.go` — Go 1.22+ `http.ServeMux` with 30+ method+path routes; security headers middleware (`X-Content-Type-Options`, `X-Frame-Options`, `Cache-Control: no-store`, `Referrer-Policy`)
+- [x] `internal/api/sites.go` — Sites + Upstreams CRUD with UUID validation, WAFMode enum check, upstream URL scheme/credential validation (SSRF prevention)
+- [x] `internal/api/rules.go` — WAF Rules CRUD with field/operator/action ENUM validation; triggers WAF engine reload on mutation
+- [x] `internal/api/analytics.go` — `GET /api/v1/logs` (paginated, filtered) + `GET /api/v1/metrics` (24h + all-time counters)
+- [x] `internal/api/settings.go` — `GET/PUT /api/v1/settings`; protected keys (e.g. `license_key`) cannot be modified via API
+- [x] `internal/api/profile.go` — `GET /api/v1/profile` + `PUT /api/v1/profile/password` (requires current password; revokes all sessions after change)
+- [x] `cmd/metalwaf/main.go` — wires `auth.NewIssuer`, mounts `api.NewRouter` on admin mux under `/api/`, adds hourly session prune goroutine; `cfg.Validate()` is now fatal (not warn)
+- [x] `internal/auth/jwt_test.go` + `internal/auth/handler_test.go` + `internal/api/router_test.go` — 49 new tests (77 total, all passing)
 
 ---
 

@@ -14,10 +14,14 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/metalwaf/metalwaf/internal/api"
+	"github.com/metalwaf/metalwaf/internal/auth"
 	"github.com/metalwaf/metalwaf/internal/config"
 	"github.com/metalwaf/metalwaf/internal/database"
 	"github.com/metalwaf/metalwaf/internal/database/sqlite"
 	"github.com/metalwaf/metalwaf/internal/license"
+	"github.com/metalwaf/metalwaf/internal/proxy"
+	"github.com/metalwaf/metalwaf/internal/waf"
 )
 
 const version = "0.1.0-lite"
@@ -54,10 +58,8 @@ func main() {
 		os.Exit(1)
 	}
 	if err := cfg.Validate(); err != nil {
-		// Validation errors are warnings until the affected phases are
-		// implemented. We log them prominently so the operator knows what
-		// needs to be fixed before going to production.
-		fmt.Fprintf(os.Stderr, "WARN: config validation: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ERROR: invalid configuration: %v\n", err)
+		os.Exit(1)
 	}
 	// ── Configure structured logger ─────────────────────────────────────────
 	var logLevel slog.Level
@@ -134,7 +136,42 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── Admin / health HTTP server (Phase 1 placeholder) ────────────────────
+	// ── Reverse proxy handler ────────────────────────────────────────────────
+	proxyHandler, err := proxy.New(ctx, store)
+	if err != nil {
+		slog.Error("failed to initialize proxy", "error", err)
+		os.Exit(1)
+	}
+
+	// ── WAF engine ───────────────────────────────────────────────────────────
+	wafEngine := waf.New(store, waf.DefaultThreshold)
+	if err := wafEngine.Reload(ctx); err != nil {
+		slog.Warn("waf: could not load custom rules from database", "error", err)
+	}
+	proxyHandler.SetWAF(wafEngine)
+	slog.Info("WAF engine ready", "rules", wafEngine.RuleCount(), "threshold", waf.DefaultThreshold)
+
+	// ── Auth issuer ──────────────────────────────────────────────────────────
+	// cfg.Validate() already verified the JWT secret and token lifetimes above.
+	issuer, err := auth.NewIssuer(
+		cfg.Auth.JWTSecret,
+		cfg.Auth.AccessTokenMinutes,
+		cfg.Auth.RefreshTokenDays,
+	)
+	if err != nil {
+		slog.Error("auth: invalid JWT configuration", "error", err)
+		os.Exit(1)
+	}
+
+	// ── REST API router ──────────────────────────────────────────────────────
+	apiRouter := api.NewRouter(api.Options{
+		Store:       store,
+		Issuer:      issuer,
+		ProxyReload: proxyHandler.Reload,
+		WAFReload:   wafEngine.Reload,
+	})
+
+	// ── Admin / health server (:9090) ────────────────────────────────────────
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := store.Ping(r.Context()); err != nil {
@@ -144,30 +181,92 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","version":%q,"edition":%q}`, version, lic.Edition())
 	})
+	mux.Handle("/api/", apiRouter)
+	slog.Info("REST API ready", "base", "http://"+cfg.Server.AdminAddr+"/api/v1")
 
-	srv := &http.Server{
+	adminSrv := &http.Server{
 		Addr:         cfg.Server.AdminAddr,
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-
 	go func() {
 		slog.Info("admin server listening", "addr", cfg.Server.AdminAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("admin server error", "error", err)
 		}
 	}()
 
-	// ── Graceful shutdown ───────────────────────────────────────────────────
+	// ── HTTP proxy server (:80) ──────────────────────────────────────────────
+	httpSrv := &http.Server{
+		Addr:         cfg.Server.HTTPAddr,
+		Handler:      proxyHandler,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	go func() {
+		slog.Info("HTTP proxy listening", "addr", cfg.Server.HTTPAddr)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP proxy error", "error", err)
+		}
+	}()
+
+	// ── HTTPS proxy server (:443) ────────────────────────────────────────────
+	// Uses a self-signed certificate until Phase 5 replaces it with the
+	// certificate manager. Clients will see a browser warning — expected.
+	tlsCfg, err := proxy.SelfSignedTLSConfig()
+	if err != nil {
+		slog.Error("failed to generate self-signed TLS config", "error", err)
+		os.Exit(1)
+	}
+	httpsSrv := &http.Server{
+		Addr:         cfg.Server.HTTPSAddr,
+		Handler:      proxyHandler,
+		TLSConfig:    tlsCfg,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	go func() {
+		slog.Warn("HTTPS proxy listening with self-signed certificate (Phase 5 will replace this)",
+			"addr", cfg.Server.HTTPSAddr)
+		// Empty certFile/keyFile: uses TLSConfig.Certificates already set above.
+		if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTPS proxy error", "error", err)
+		}
+	}()
+
+	// ── Session prune goroutine ─────────────────────────────────────────────
+	// Periodically removes expired sessions so the table doesn't grow without
+	// bound. Runs every hour; errors are logged as warnings (non-fatal).
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if perr := store.PruneExpiredSessions(context.Background()); perr != nil {
+					slog.Warn("session prune error", "error", perr)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// ── Graceful shutdown ────────────────────────────────────────────────────
 	<-ctx.Done()
 	slog.Info("shutdown signal received")
 
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
-	if err := srv.Shutdown(shutCtx); err != nil {
-		slog.Error("server shutdown error", "error", err)
+
+	for _, srv := range []*http.Server{adminSrv, httpSrv, httpsSrv} {
+		if err := srv.Shutdown(shutCtx); err != nil {
+			slog.Error("server shutdown error", "addr", srv.Addr, "error", err)
+		}
 	}
 
 	slog.Info("MetalWAF stopped")

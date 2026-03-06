@@ -1,7 +1,11 @@
 # MetalWAF configuration
 # All values can be overridden via environment variables (see loader.go).
-
-edition: lite  # lite | pro
+#
+# LICENSE KEY: Do NOT put the license key here. It is business data, not
+# infrastructure config. Manage it from the admin dashboard (Settings → License).
+# For automated deployments (Docker/k8s), use the METALWAF_LICENSE_KEY env var
+# as a one-time bootstrap: the key will be saved to the database automatically
+# on first run and the env var is no longer needed afterwards.
 
 server:
   http_addr:  ":80"
@@ -9,17 +13,28 @@ server:
   admin_addr: ":9090"
 
 database:
-  # SQLite path (used in lite edition).
+  # SQLite — default backend, zero config, single file.
+  # Works for both LITE and PRO editions.
   # The directory is created automatically if it does not exist.
   sqlite_path: "data/metalwaf.db"
 
-  # PostgreSQL DSN (used in pro edition).
+  # PostgreSQL — optional alternative for high-traffic production deployments.
+  # NOT YET IMPLEMENTED. Setting this DSN will cause the server to exit with
+  # an error until Phase 1b (internal/database/postgres) is complete.
+  # To switch once implemented:
+  #   1. Uncomment the dsn line and fill in your credentials.
+  #   2. Run:  ./metalwaf --db-migrate
+  #   3. Start the server normally.
+  # Note: existing SQLite data is NOT migrated automatically.
   # dsn: "postgres://user:password@localhost:5432/metalwaf?sslmode=disable"
 
 auth:
-  # jwt_secret: "change-me-in-production"  # set via METALWAF_JWT_SECRET env var
-  access_token_minutes: 15
-  refresh_token_days: 7
+  # jwt_secret: required before enabling the REST API (Phase 4).
+  # DO NOT leave this empty in production. Set it here or via METALWAF_JWT_SECRET.
+  # Example: openssl rand -hex 32
+  # jwt_secret: "change-me-use-metalwaf_jwt_secret-env-var-in-production"
+  access_token_minutes: 15   # how long an access token is valid
+  refresh_token_days: 7      # how long a refresh token is valid
 
 log:
   level: info    # debug | info | warn | error

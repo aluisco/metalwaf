@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/metalwaf/metalwaf/internal/config"
 	"github.com/metalwaf/metalwaf/internal/database"
 	"github.com/metalwaf/metalwaf/internal/database/sqlite"
+	"github.com/metalwaf/metalwaf/internal/license"
 )
 
 const version = "0.1.0-lite"
@@ -51,7 +53,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ERROR: loading config: %v\n", err)
 		os.Exit(1)
 	}
-
+	if err := cfg.Validate(); err != nil {
+		// Validation errors are warnings until the affected phases are
+		// implemented. We log them prominently so the operator knows what
+		// needs to be fixed before going to production.
+		fmt.Fprintf(os.Stderr, "WARN: config validation: %v\n", err)
+	}
 	// ── Configure structured logger ─────────────────────────────────────────
 	var logLevel slog.Level
 	if err := logLevel.UnmarshalText([]byte(cfg.Log.Level)); err != nil {
@@ -66,27 +73,60 @@ func main() {
 	}
 	slog.SetDefault(slog.New(handler))
 
-	slog.Info("starting MetalWAF", "version", version, "edition", cfg.Edition)
+	slog.Info("starting MetalWAF", "version", version)
 
 	// ── Signal context ──────────────────────────────────────────────────────
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// ── Initialize database store ───────────────────────────────────────────
-	var store database.Store
-	switch cfg.Edition {
-	case "lite", "":
-		store, err = sqlite.New(ctx, cfg.Database.SQLitePath)
-		if err != nil {
-			slog.Error("failed to open SQLite store", "path", cfg.Database.SQLitePath, "error", err)
-			os.Exit(1)
-		}
-		slog.Info("SQLite store ready", "path", cfg.Database.SQLitePath)
-	default:
-		slog.Error("unknown edition; valid values are: lite", "edition", cfg.Edition)
+	// The DB is opened before license validation because the license key is
+	// stored in the settings table — the dashboard is the single place where
+	// users manage their license key.
+	//
+	// Backend selection:
+	//   database.dsn set   → PostgreSQL  (Phase 1b — not yet implemented)
+	//   database.dsn empty → SQLite      (current default)
+	if cfg.Database.DSN != "" {
+		slog.Error("PostgreSQL backend is not yet implemented",
+			"hint", "remove database.dsn from the config file or unset METALWAF_DB_DSN to use SQLite")
 		os.Exit(1)
 	}
+	var store database.Store
+	store, err = sqlite.New(ctx, cfg.Database.SQLitePath)
+	if err != nil {
+		slog.Error("failed to open SQLite store", "path", cfg.Database.SQLitePath, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("store ready", "backend", "sqlite", "path", cfg.Database.SQLitePath)
 	defer store.Close()
+
+	// ── Bootstrap license key from environment variable ─────────────────────
+	// METALWAF_LICENSE_KEY is a one-time bootstrap helper for Docker/k8s
+	// deployments where the UI is not available on first run. If set, the key
+	// is persisted to the database so subsequent restarts don't need it.
+	// The env var is intentionally NOT read at every startup — the DB is the
+	// single source of truth after the first boot.
+	if bootstrapKey := os.Getenv("METALWAF_LICENSE_KEY"); bootstrapKey != "" {
+		if existing, _ := store.GetSetting(ctx, "license_key"); existing == "" {
+			if werr := store.SetSetting(ctx, "license_key", bootstrapKey); werr != nil {
+				slog.Warn("license: could not persist bootstrap key to database", "error", werr)
+			} else {
+				slog.Info("license: key saved to database from METALWAF_LICENSE_KEY (bootstrap)")
+			}
+		}
+	}
+
+	// ── License validation ──────────────────────────────────────────────────
+	// Read the key from the settings table — single source of truth.
+	// The local encrypted cache (grace period) is stored next to the DB file.
+	licenseKey, _ := store.GetSetting(ctx, "license_key")
+	cacheDir := filepath.Dir(cfg.Database.SQLitePath)
+	if cacheDir == "." {
+		cacheDir = "data"
+	}
+	lic := license.Validate(ctx, licenseKey, cacheDir, version)
+	slog.Info("edition active", "edition", lic.Edition())
 
 	// ── Seed default admin user ─────────────────────────────────────────────
 	if err := seedAdminUser(ctx, store); err != nil {
@@ -102,7 +142,7 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","version":%q}`, version)
+		fmt.Fprintf(w, `{"status":"ok","version":%q,"edition":%q}`, version, lic.Edition())
 	})
 
 	srv := &http.Server{

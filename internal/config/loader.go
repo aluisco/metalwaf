@@ -10,7 +10,6 @@ import (
 
 // defaults defines the out-of-the-box configuration values.
 var defaults = Config{
-	Edition: "lite",
 	Server: Server{
 		HTTPAddr:  ":80",
 		HTTPSAddr: ":443",
@@ -53,10 +52,10 @@ func Load(path string) (*Config, error) {
 }
 
 // applyEnv overlays config fields with values from environment variables.
+// Note: METALWAF_LICENSE_KEY is intentionally NOT handled here. The license key
+// is business data managed via the dashboard and stored in the settings table.
+// It is read from the database at startup; see cmd/metalwaf/main.go.
 func applyEnv(cfg *Config) {
-	if v := os.Getenv("METALWAF_EDITION"); v != "" {
-		cfg.Edition = strings.ToLower(v)
-	}
 	if v := os.Getenv("METALWAF_HTTP_ADDR"); v != "" {
 		cfg.Server.HTTPAddr = v
 	}

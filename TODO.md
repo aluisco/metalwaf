@@ -19,6 +19,23 @@ Development progress by phase. Completed tasks are marked with `[x]`.
 - [x] Structured logger with `log/slog` (text/json, configurable level)
 - [x] `configs/metalwaf.yaml`
 - [x] `.gitignore`, `README.md`, `CHANGELOG.md`, `TODO.md`
+- [x] `LICENSE` file (MIT — LITE edition)
+- [x] Licensing model: LITE = free open source (MIT); PRO = paid commercial with priority support + SLA
+
+---
+
+## 🔲 Phase 1b — PostgreSQL Support (Optional Backend)
+
+> SQLite is the default and sufficient for most deployments. This phase adds an optional PostgreSQL backend available to **both editions**. Users who want it must run a migration command.
+
+- [ ] Define a build-time interface selector: if `database.dsn` is set (or `METALWAF_DB_DSN`), use PostgreSQL; otherwise use SQLite
+- [ ] `internal/database/postgres/store.go` — PostgreSQL implementation of the `Store` interface (`pgx/v5` driver)
+- [ ] `internal/database/postgres/migrate.go` — migration runner adapted for PostgreSQL (uses `schema_migrations` table same as SQLite)
+- [ ] `internal/database/postgres/migrations/001_initial.sql` — PostgreSQL-compatible initial schema (same structure, adapted data types)
+- [ ] `--db-migrate` CLI flag in `cmd/metalwaf/main.go` — when present: run migrations and exit (do not start the server)
+- [ ] Update `cmd/metalwaf/main.go` to pick SQLite or PostgreSQL store at startup based on `database.dsn`
+- [ ] Document migration procedure in `README.md` (already done) and `configs/metalwaf.yaml` (already done)
+- [ ] Integration tests against a real PostgreSQL instance (Docker Compose for CI)
 
 ---
 
@@ -165,7 +182,10 @@ Development progress by phase. Completed tasks are marked with `[x]`.
 
 ---
 
-## 🔲 Future — PRO Edition
+## 🔲 Future — PRO Edition (Commercial)
+
+> PRO is a **paid commercial** product. Licenses available at metalwaf.io.
+> Includes all LITE features plus everything below, with priority support and SLA.
 
 - [ ] PostgreSQL driver (`internal/database/postgres/store.go`) implementing the same `Store` interface
 - [ ] PostgreSQL migrations in `internal/database/postgres/migrations/`

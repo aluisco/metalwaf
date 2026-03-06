@@ -1,8 +1,14 @@
 package config
 
+import (
+	"errors"
+	"fmt"
+)
+
 // Config is the root configuration structure for MetalWAF.
+// License keys are NOT stored here — they are managed via the dashboard and
+// persisted in the settings table of the database.
 type Config struct {
-	Edition  string   `yaml:"edition"` // lite, pro
 	Server   Server   `yaml:"server"`
 	Database Database `yaml:"database"`
 	Auth     Auth     `yaml:"auth"`
@@ -17,13 +23,14 @@ type Server struct {
 }
 
 // Database holds the storage backend configuration.
-// SQLitePath is used for the "lite" edition; DSN for "pro" (PostgreSQL).
+// If DSN is set, PostgreSQL is used; otherwise SQLite is used.
 type Database struct {
 	SQLitePath string `yaml:"sqlite_path"`
 	DSN        string `yaml:"dsn"`
 }
 
 // Auth holds JWT token configuration.
+// JWTSecret is required before enabling the REST API (Phase 4).
 type Auth struct {
 	JWTSecret          string `yaml:"jwt_secret"`
 	AccessTokenMinutes int    `yaml:"access_token_minutes"`
@@ -34,4 +41,53 @@ type Auth struct {
 type Log struct {
 	Level  string `yaml:"level"`  // debug, info, warn, error
 	Format string `yaml:"format"` // text, json
+}
+
+// Validate checks that all currently-consumed configuration fields are valid.
+// Fields that belong to unimplemented phases (e.g. JWTSecret for Phase 4) are
+// validated here too so that misconfigurations are caught early at startup
+// rather than silently failing later.
+func (c *Config) Validate() error {
+	var errs []error
+
+	// Server
+	if c.Server.AdminAddr == "" {
+		errs = append(errs, errors.New("server.admin_addr must not be empty"))
+	}
+
+	// Database: at least one backend must be reachable.
+	// Note: DSN (PostgreSQL) is not yet implemented — the server will reject it
+	// at startup. Validate it here anyway so the error is surfaced early.
+	if c.Database.DSN == "" && c.Database.SQLitePath == "" {
+		errs = append(errs, errors.New("database: either sqlite_path or dsn must be set"))
+	}
+
+	// Auth: jwt_secret is a security-critical field. Warn-only for now
+	// (Phase 4 not yet implemented), but it must be set before enabling the API.
+	if c.Auth.JWTSecret == "" {
+		errs = append(errs, errors.New(
+			"auth.jwt_secret is not set — set METALWAF_JWT_SECRET or add it to the config file; "+
+				"the REST API will refuse to start without it",
+		))
+	}
+	if c.Auth.AccessTokenMinutes <= 0 {
+		errs = append(errs, fmt.Errorf("auth.access_token_minutes must be > 0, got %d", c.Auth.AccessTokenMinutes))
+	}
+	if c.Auth.RefreshTokenDays <= 0 {
+		errs = append(errs, fmt.Errorf("auth.refresh_token_days must be > 0, got %d", c.Auth.RefreshTokenDays))
+	}
+
+	// Log
+	switch c.Log.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		errs = append(errs, fmt.Errorf("log.level must be debug|info|warn|error, got %q", c.Log.Level))
+	}
+	switch c.Log.Format {
+	case "text", "json":
+	default:
+		errs = append(errs, fmt.Errorf("log.format must be text|json, got %q", c.Log.Format))
+	}
+
+	return errors.Join(errs...)
 }

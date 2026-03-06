@@ -38,6 +38,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 - **Automatic seeding** of the `admin` user on first run (bcrypt password, configurable via `METALWAF_ADMIN_PASSWORD`)
 - **`configs/metalwaf.yaml`** — documented default configuration
 - **`.gitignore`** — binaries, `data/`, `web/dist/`, `.env` files
+- **`LICENSE`** — MIT License (LITE edition)
+- **Licensing model defined**: LITE = free and open source (MIT); PRO = paid commercial with priority support + SLA
 
 [0.1.0]: https://github.com/metalwaf/metalwaf/releases/tag/v0.1.0
 [Unreleased]: https://github.com/metalwaf/metalwaf/compare/v0.1.0...HEAD

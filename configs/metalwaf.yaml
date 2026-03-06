@@ -1,0 +1,26 @@
+# MetalWAF configuration
+# All values can be overridden via environment variables (see loader.go).
+
+edition: lite  # lite | pro
+
+server:
+  http_addr:  ":80"
+  https_addr: ":443"
+  admin_addr: ":9090"
+
+database:
+  # SQLite path (used in lite edition).
+  # The directory is created automatically if it does not exist.
+  sqlite_path: "data/metalwaf.db"
+
+  # PostgreSQL DSN (used in pro edition).
+  # dsn: "postgres://user:password@localhost:5432/metalwaf?sslmode=disable"
+
+auth:
+  # jwt_secret: "change-me-in-production"  # set via METALWAF_JWT_SECRET env var
+  access_token_minutes: 15
+  refresh_token_days: 7
+
+log:
+  level: info    # debug | info | warn | error
+  format: text   # text | json

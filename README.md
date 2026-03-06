@@ -1,0 +1,200 @@
+# MetalWAF
+
+> Web Application Firewall + Reverse Proxy written entirely in Go, with an embedded React dashboard. No external runtime dependencies — a single binary.
+
+---
+
+## Features
+
+| Feature | LITE | PRO |
+|---|:---:|:---:|
+| HTTP/HTTPS reverse proxy | ✅ | ✅ |
+| Domain-based virtual hosting | ✅ | ✅ |
+| WAF Engine (OWASP Top 10) | ✅ | ✅ |
+| SQLi, XSS, RCE, LFI, SSRF detection | ✅ | ✅ |
+| Anomaly scoring system | ✅ | ✅ |
+| Detect-only / block mode | ✅ | ✅ |
+| Rate limiting per IP / route / global | ✅ | ✅ |
+| IP blocklist (CIDR) | ✅ | ✅ |
+| Manual TLS certificates (.pem / .pfx) | ✅ | ✅ |
+| Automatic Let's Encrypt (HTTP-01) | ✅ | ✅ |
+| Embedded React dashboard | ✅ | ✅ |
+| JWT auth + refresh tokens | ✅ | ✅ |
+| 2FA TOTP | ✅ | ✅ |
+| Analytics: logs, metrics, top IPs | ✅ | ✅ |
+| Database | SQLite | PostgreSQL |
+| Let's Encrypt wildcard (DNS-01) | ❌ | ✅ |
+| Load balancing | ❌ | ✅ |
+| Multi-tenancy | ❌ | ✅ |
+| Clustering / HA | ❌ | ✅ |
+| SSO / SAML / OIDC | ❌ | ✅ |
+| SIEM export (syslog, S3, webhook) | ❌ | ✅ |
+
+---
+
+## Requirements
+
+- **Go 1.22+** — backend compilation
+- **Node.js 20+** — frontend compilation (development only)
+- CGO-free — SQLite via `modernc.org/sqlite` (pure Go)
+
+---
+
+## Quick start
+
+### Clone and build
+
+```bash
+git clone https://github.com/metalwaf/metalwaf.git
+cd metalwaf
+
+# Backend only (no UI)
+go build -o metalwaf ./cmd/metalwaf
+
+# Full build (backend + embedded frontend)
+make build
+```
+
+### Run
+
+```bash
+# Using default configuration
+./metalwaf
+
+# Pointing to a specific config file
+./metalwaf --config /etc/metalwaf/metalwaf.yaml
+
+# Key environment variables
+METALWAF_ADMIN_PASSWORD=mysecret \
+METALWAF_JWT_SECRET=super-secure-key \
+./metalwaf
+```
+
+### Docker
+
+```bash
+docker build -t metalwaf:latest .
+docker run -d \
+  -p 80:80 -p 443:443 -p 9090:9090 \
+  -v metalwaf_data:/app/data \
+  -e METALWAF_ADMIN_PASSWORD=mysecret \
+  -e METALWAF_JWT_SECRET=super-secure-key \
+  metalwaf:latest
+```
+
+---
+
+## Configuration
+
+The main configuration file is `configs/metalwaf.yaml`. All values can be overridden via environment variables.
+
+```yaml
+edition: lite          # lite | pro
+
+server:
+  http_addr:  ":80"
+  https_addr: ":443"
+  admin_addr: ":9090"  # dashboard + REST API
+
+database:
+  sqlite_path: "data/metalwaf.db"
+
+auth:
+  access_token_minutes: 15
+  refresh_token_days: 7
+
+log:
+  level: info      # debug | info | warn | error
+  format: text     # text | json
+```
+
+### Environment variables
+
+| Variable | Description |
+|---|---|
+| `METALWAF_EDITION` | `lite` or `pro` |
+| `METALWAF_HTTP_ADDR` | HTTP listen address |
+| `METALWAF_HTTPS_ADDR` | HTTPS listen address |
+| `METALWAF_ADMIN_ADDR` | Admin panel listen address |
+| `METALWAF_SQLITE_PATH` | Path to the SQLite database file |
+| `METALWAF_DB_DSN` | PostgreSQL DSN (PRO only) |
+| `METALWAF_JWT_SECRET` | Secret key used to sign JWT tokens |
+| `METALWAF_ADMIN_PASSWORD` | Initial `admin` user password |
+| `METALWAF_LOG_LEVEL` | Log level |
+| `METALWAF_LOG_FORMAT` | Log format (`text` or `json`) |
+
+---
+
+## Available endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/healthz` | Health check + database ping |
+
+> The full REST API under `/api/v1/` is added in Phase 4.
+
+---
+
+## Project structure
+
+```
+MetalWAF/
+├── cmd/metalwaf/           ← Main entrypoint
+├── internal/
+│   ├── auth/               ← JWT, bcrypt, 2FA TOTP
+│   ├── config/             ← Structs + YAML/env loader
+│   ├── database/
+│   │   ├── interface.go    ← Store interface + domain models
+│   │   └── sqlite/         ← SQLite implementation (LITE)
+│   ├── waf/                ← WAF engine + rules + signatures
+│   ├── proxy/              ← Reverse proxy + rate limiter
+│   ├── certificates/       ← TLS manager + Let's Encrypt
+│   ├── analytics/          ← Traffic collector and aggregator
+│   └── api/                ← REST API (router + handlers)
+├── web/                    ← React frontend (embedded in binary)
+└── configs/                ← Default configuration
+```
+
+---
+
+## Development
+
+### Run in development mode
+
+```bash
+# Backend hot reload (requires 'air')
+air
+
+# Frontend dev server
+cd web && npm run dev
+```
+
+### Tests
+
+```bash
+go test ./...
+```
+
+### Lint
+
+```bash
+golangci-lint run ./...
+```
+
+---
+
+## Security
+
+- All passwords are stored with **bcrypt** (cost 10)
+- JWT tokens signed with HMAC-SHA256
+- SQLite with **WAL mode** + `foreign_keys=ON` + `busy_timeout=5000`
+- HTTP security headers on all dashboard responses
+- `/healthz` does not expose sensitive information
+
+**Default credentials**: `admin` / `changeme123!` — change immediately in production by setting `METALWAF_ADMIN_PASSWORD` before the first run.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE)

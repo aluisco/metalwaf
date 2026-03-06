@@ -1,0 +1,28 @@
+# Binary
+/metalwaf
+/metalwaf.exe
+
+# Data directory (SQLite DB)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Build artifacts
+web/dist/
+web/node_modules/
+
+# Go
+vendor/
+
+# Environment files
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+*.swp

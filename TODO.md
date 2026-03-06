@@ -92,15 +92,17 @@ Development progress by phase. Completed tasks are marked with `[x]`.
 
 ---
 
-## 🔲 Phase 5 — TLS Certificates
+## ✅ Phase 5 — TLS Certificates
 
-- [ ] `internal/certificates/upload.go` — receive and parse certificates: `.pem`, `.crt`+`.key`, `.pfx`/`.p12`; validate expiry and cert↔key consistency
-- [ ] `internal/certificates/store.go` — persist CertPEM and KeyPEM in the DB (encrypted at rest with AES-GCM using `METALWAF_MASTER_KEY`)
-- [ ] `internal/certificates/letsencrypt.go` — integration with `golang.org/x/crypto/acme/autocert`; HTTP-01 challenge; store certs in DB
-- [ ] `internal/certificates/manager.go` — orchestrator: on startup, build `tls.Config` with certs for all active sites; hot rotation without restart
-- [ ] Auto-renewal: goroutine that checks expiry every 24 h and renews if fewer than 30 days remain
-- [ ] Near-expiry notification in the dashboard
-- [ ] Tests: format parsing, key-pair validation, renewal flow
+- [x] `internal/certificates/encrypt.go` — AES-256-GCM `EncryptKey`/`DecryptKey`; passthrough when `masterKey` is nil; `SHA-256` key derivation
+- [x] `internal/certificates/parse.go` — `ParsePair(certPEM, keyPEM)` validates cert+key, rejects expired certs, sets `Leaf`; `FirstDomain`, `CertInfo`
+- [x] `internal/certificates/acme_cache.go` — `autocert.Cache` backed by the `settings` table (`acme:` prefix, base64-encoded)
+- [x] `internal/certificates/manager.go` — `Manager` orchestrator: loads manual certs from DB, Let's Encrypt via `autocert`, self-signed fallback (P-256 ECDSA, 10-year); SNI dispatch; hot-reload without restart
+- [x] `internal/api/certificates.go` — REST handlers: `List`, `Create` (upload), `Get`, `Delete`, `RequestACME`; private key never returned in responses
+- [x] `internal/api/router.go` — added `CertReload`/`MasterKey` to `Options`; real certificate routes replace the stub (5 routes)
+- [x] `cmd/metalwaf/main.go` — parses `METALWAF_MASTER_KEY`; wires `certManager`; HTTP server wrapped with `AcmeChallengeHandler` for HTTP-01; HTTPS uses `certManager.TLSConfig()`; 24 h expiry-check goroutine
+- [x] `internal/certificates/manager_test.go` — 17 tests: encrypt/decrypt, parse pair, ACME cache, manager SNI dispatch, wildcard, fallback, reload swap
+- [x] 94 tests total, all passing
 
 ---
 

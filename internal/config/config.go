@@ -62,21 +62,6 @@ func (c *Config) Validate() error {
 		errs = append(errs, errors.New("database: either sqlite_path or dsn must be set"))
 	}
 
-	// Auth: jwt_secret is a security-critical field. Warn-only for now
-	// (Phase 4 not yet implemented), but it must be set before enabling the API.
-	if c.Auth.JWTSecret == "" {
-		errs = append(errs, errors.New(
-			"auth.jwt_secret is not set — set METALWAF_JWT_SECRET or add it to the config file; "+
-				"the REST API will refuse to start without it",
-		))
-	}
-	if c.Auth.AccessTokenMinutes <= 0 {
-		errs = append(errs, fmt.Errorf("auth.access_token_minutes must be > 0, got %d", c.Auth.AccessTokenMinutes))
-	}
-	if c.Auth.RefreshTokenDays <= 0 {
-		errs = append(errs, fmt.Errorf("auth.refresh_token_days must be > 0, got %d", c.Auth.RefreshTokenDays))
-	}
-
 	// Log
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":

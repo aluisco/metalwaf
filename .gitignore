@@ -11,6 +11,8 @@ data/
 # Build artifacts
 web/dist/
 web/node_modules/
+internal/frontend/web/dist/
+internal/frontend/web/node_modules/
 
 # Go
 vendor/

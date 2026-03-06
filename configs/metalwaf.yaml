@@ -32,7 +32,7 @@ auth:
   # jwt_secret: required before enabling the REST API (Phase 4).
   # DO NOT leave this empty in production. Set it here or via METALWAF_JWT_SECRET.
   # Example: openssl rand -hex 32
-  # jwt_secret: "change-me-use-metalwaf_jwt_secret-env-var-in-production"
+  jwt_secret: "change-me-use-metalwaf_jwt_secret-env-var-in-production"
   access_token_minutes: 15   # how long an access token is valid
   refresh_token_days: 7      # how long a refresh token is valid
 

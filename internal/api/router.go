@@ -8,14 +8,16 @@ import (
 	"github.com/metalwaf/metalwaf/internal/database"
 )
 
-// Options configures the API router. ProxyReload and WAFReload are called
-// after mutations that require the proxy or WAF engine to reload its config.
-// Either can be nil (no-op, useful in tests).
+// Options configures the API router. ProxyReload, WAFReload and CertReload are
+// called after mutations that require the respective subsystem to reload its
+// config. Any can be nil (no-op, useful in tests).
 type Options struct {
 	Store       database.Store
 	Issuer      *auth.Issuer
 	ProxyReload func(ctx context.Context) error
 	WAFReload   func(ctx context.Context) error
+	CertReload  func(ctx context.Context) error
+	MasterKey   []byte // AES-256-GCM key for private key encryption at rest
 }
 
 // NewRouter builds and returns the complete /api/v1 handler.
@@ -27,6 +29,7 @@ func NewRouter(opts Options) http.Handler {
 	authH := auth.NewHandler(opts.Store, opts.Issuer)
 	sitesH := &sitesHandler{store: opts.Store, reload: opts.ProxyReload}
 	rulesH := &rulesHandler{store: opts.Store, reload: opts.WAFReload}
+	certsH := &certsHandler{store: opts.Store, masterKey: opts.MasterKey, reload: opts.CertReload}
 	analyticsH := &analyticsHandler{store: opts.Store}
 	settingsH := &settingsHandler{store: opts.Store}
 	profileH := &profileHandler{store: opts.Store}
@@ -101,16 +104,19 @@ func NewRouter(opts Options) http.Handler {
 	mux.Handle("PUT /api/v1/settings/{key}",
 		iss.RequireAdmin(http.HandlerFunc(settingsH.Set)))
 
-	// ── Certificates (stub — Phase 5) ─────────────────────────────────────────
+	// ── Certificates (read: any role; write: admin) ──────────────────────────
+	// POST /letsencrypt must be registered before /{id} so it isn't swallowed
+	// by the {id} wildcard on paths like "letsencrypt".
+	mux.Handle("POST /api/v1/certificates/letsencrypt",
+		iss.RequireAdmin(http.HandlerFunc(certsH.RequestACME)))
 	mux.Handle("GET /api/v1/certificates",
-		iss.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			respond(w, http.StatusOK, []any{})
-		})))
+		iss.RequireAuth(http.HandlerFunc(certsH.List)))
 	mux.Handle("POST /api/v1/certificates",
-		iss.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			respondError(w, http.StatusNotImplemented,
-				"certificate management will be available in Phase 5")
-		})))
+		iss.RequireAdmin(http.HandlerFunc(certsH.Create)))
+	mux.Handle("GET /api/v1/certificates/{id}",
+		iss.RequireAuth(http.HandlerFunc(certsH.Get)))
+	mux.Handle("DELETE /api/v1/certificates/{id}",
+		iss.RequireAdmin(http.HandlerFunc(certsH.Delete)))
 
 	return securityHeaders(mux)
 }

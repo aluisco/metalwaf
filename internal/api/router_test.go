@@ -134,6 +134,10 @@ func (m *routerMockStore) ListRequestLogs(_ context.Context, _ database.RequestL
 	return []*database.RequestLog{}, nil
 }
 
+func (m *routerMockStore) ListCertificates(_ context.Context) ([]*database.Certificate, error) {
+	return []*database.Certificate{}, nil
+}
+
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
 const routerTestSecret = "router-test-secret-that-is-long-enough-abc123"

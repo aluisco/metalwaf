@@ -1,0 +1,28 @@
+.login-page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  background-image: radial-gradient(ellipse at 50% 0%, #00d4ff10 0%, transparent 70%);
+}
+
+.login-card {
+  width: min(380px, 95vw);
+  padding: 2rem;
+}
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: .4rem;
+  margin-bottom: 2rem;
+}
+
+.login-logo h1 {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+}

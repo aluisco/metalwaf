@@ -8,6 +8,8 @@ import { notifications } from '@mantine/notifications'
 const DESCRIPTIONS = {
   waf_block_score:       'Min threat score to block a request (0–100)',
   waf_detect_score:      'Min threat score to log (not block) a request',
+  waf_paranoia_level:    'WAF paranoia level: 1=essential, 2=moderate (default), 3=aggressive, 4=paranoid',
+  alert_block_threshold: 'Blocked requests/minute threshold to trigger alerts (default 20)',
   rate_limit_rps:        'Burst request rate per IP (req/sec)',
   rate_limit_window:     'Window in seconds for rate-limit counting',
   log_retention_days:    'How many days access logs are kept',

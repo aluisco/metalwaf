@@ -41,3 +41,12 @@ func decode(r *http.Request, dst any, maxBytes int64) error {
 	}
 	return json.NewDecoder(io.LimitReader(r.Body, maxBytes)).Decode(dst)
 }
+
+// readBody reads the full request body up to maxBytes.
+// Returns an error if the body is nil, unreadable, or exceeds the limit.
+func readBody(r *http.Request, maxBytes int64) ([]byte, error) {
+	if r.Body == nil {
+		return nil, io.EOF
+	}
+	return io.ReadAll(io.LimitReader(r.Body, maxBytes))
+}

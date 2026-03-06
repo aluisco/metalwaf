@@ -8,6 +8,9 @@ import WAFRules from './pages/WAFRules.jsx'
 import Certificates from './pages/Certificates.jsx'
 import Analytics from './pages/Analytics.jsx'
 import Settings from './pages/Settings.jsx'
+import Users from './pages/Users.jsx'
+import Profile from './pages/Profile.jsx'
+import IPLists from './pages/IPLists.jsx'
 
 function RequireAuth({ children }) {
   const location = useLocation()
@@ -26,6 +29,9 @@ export default function App() {
         <Route path="rules"        element={<WAFRules />} />
         <Route path="certificates" element={<Certificates />} />
         <Route path="analytics"    element={<Analytics />} />
+        <Route path="ip-lists"     element={<IPLists />} />
+        <Route path="users"        element={<Users />} />
+        <Route path="profile"      element={<Profile />} />
         <Route path="settings"     element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

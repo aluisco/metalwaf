@@ -16,12 +16,13 @@ const (
 
 // Operator constants — how the rule value is matched against the field.
 const (
-	OpContains   = "contains"
-	OpRegex      = "regex"
-	OpEquals     = "equals"
-	OpStartsWith = "startswith"
-	OpEndsWith   = "endswith"
-	OpCIDR       = "cidr"
+	OpContains    = "contains"
+	OpNotContains = "not_contains"
+	OpRegex       = "regex"
+	OpEquals      = "equals"
+	OpStartsWith  = "startswith"
+	OpEndsWith    = "endswith"
+	OpCIDR        = "cidr"
 )
 
 // Action constants — what the rule does when it matches.
@@ -47,6 +48,8 @@ const (
 	CategoryRCE       = "rce"
 	CategoryTraversal = "traversal"
 	CategoryScanner   = "scanner"
+	CategoryXXE       = "xxe"
+	CategorySSRF      = "ssrf"
 	CategoryCustom    = "custom"
 )
 
@@ -63,6 +66,9 @@ type Rule struct {
 	Score    int
 	Action   string
 	Builtin  bool
+	// Level is the minimum paranoia level required to activate this rule.
+	// 0 = always active (used for custom rules); 1–4 = paranoia threshold.
+	Level int
 }
 
 // FromDB converts a database.WAFRule to a Rule.

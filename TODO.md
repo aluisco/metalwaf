@@ -106,65 +106,71 @@ Development progress by phase. Completed tasks are marked with `[x]`.
 
 ---
 
-## 🔲 Phase 6 — Embedded React Frontend
+## ✅ Phase 6 — Embedded React Frontend
 
-- [ ] Initialize React project with Vite (`web/`)
-- [ ] Configure `//go:embed web/dist` in `cmd/metalwaf/main.go`
-- [ ] `Login.jsx` page with form + TOTP support
-- [ ] `Dashboard.jsx` page — real-time metrics: requests/min, blocked threats, top IPs, traffic graph (last 24 h)
-- [ ] `Sites.jsx` page — list, create, edit and delete sites + upstreams
-- [ ] `WAFRules.jsx` page — rule editor: global and per-site; enable/disable toggle
-- [ ] `Certificates.jsx` page — manual cert upload, "Get with Let's Encrypt" button, expiry status
-- [ ] `Analytics.jsx` page — log table with filters (IP, site, blocked, date range) + charts
-- [ ] `Settings.jsx` page — global config: anomaly score threshold, default WAF mode, log retention
-- [ ] `<Navbar />` component with edition indicator (LITE badge)
-- [ ] HTTP client with automatic refresh token interceptor
-- [ ] Dark/light theme persisted in `localStorage`
-- [ ] Production build integrated into `Makefile`
-- [ ] Tests for critical components (Jest + React Testing Library)
+- [x] Initialize React project with Vite (`web/`)
+- [x] Configure `//go:embed web/dist` in `cmd/metalwaf/main.go`
+- [x] `Login.jsx` page with form + TOTP support
+- [x] `Dashboard.jsx` page — real-time metrics: requests/min, blocked threats, top IPs, traffic graph (last 24 h)
+- [x] `Sites.jsx` page — list, create, edit and delete sites + upstreams
+- [x] `WAFRules.jsx` page — rule editor: global and per-site; enable/disable toggle
+- [x] `Certificates.jsx` page — manual cert upload, "Get with Let's Encrypt" button, expiry status
+- [x] `Analytics.jsx` page — log table with filters (IP, site, blocked, date range) + charts
+- [x] `Settings.jsx` page — global config: anomaly score threshold, default WAF mode, log retention
+- [x] `<Navbar />` component with edition indicator (LITE badge)
+- [x] HTTP client with automatic refresh token interceptor
+- [x] Dark/light theme persisted in `localStorage`
+- [x] Production build integrated into `Makefile`
+- [ ] Tests for critical components (Jest + React Testing Library) — *deferred, low priority*
 
 ---
 
-## 🔲 Phase 7 — Rate Limiting + Access Control Lists
+## 🔲 Phase 7 — Rate Limiting + Access Control Lists (Partial — 6/8 done)
 
-- [ ] Configurable global rate limiting (requests/sec for the whole instance)
-- [ ] Per-site rate limiting (requests/sec per IP)
+- [x] Configurable global rate limiting (requests/sec for the whole instance)
+- [x] Per-site rate limiting (requests/sec per IP)
 - [ ] Per-route rate limiting (e.g. `/api/` stricter than `/static/`)
-- [ ] 429 response with `Retry-After` header
-- [ ] IP allowlist: IPs/CIDR ranges that are never blocked by the WAF or rate limiter
-- [ ] IP blocklist: IPs/CIDR ranges that always receive 403
+- [x] 429 response with `Retry-After` header
+- [x] IP allowlist: IPs/CIDR ranges that are never blocked by the WAF or rate limiter
+- [x] IP blocklist: IPs/CIDR ranges that always receive 403
 - [ ] GeoIP: country-based blocking (MaxMind GeoLite2 database integration) — *optional*
-- [ ] Persist lists in the DB and manage from the dashboard
+- [x] Persist lists in the DB and manage from the dashboard
 
 ---
 
-## 🔲 Phase 8 — Analytics and Metrics
+## ✅ Phase 8 — Analytics and Metrics (DONE)
 
-- [ ] `internal/analytics/collector.go` — channel-based collector; writes `RequestLog` to the DB asynchronously (does not block the proxy)
-- [ ] `internal/analytics/aggregator.go` — aggregate metrics in 1-min / 1-h / 1-day windows, in memory and in the DB
-- [ ] Metrics exposed at `GET /api/v1/metrics`:
-  - Total, blocked and allowed requests
-  - Top 10 IPs by request count
-  - Top 10 most attacked paths
-  - Top 10 most triggered rules
-  - Status code distribution
-  - Requests per site
-- [ ] `GET /api/v1/metrics/prometheus` — Prometheus format for external scraping
-- [ ] Basic alerting: blocked-requests-per-minute threshold → dashboard notification (WebSocket or polling)
-- [ ] Configurable log retention: automatic purge of records older than N days
-- [ ] Tests for collector and aggregator
+- [x] `internal/analytics/collector.go` — channel-based collector (4096-entry buffer); writes `RequestLog` to the DB asynchronously via a single worker goroutine — proxy hot path is never blocked
+- [x] `internal/analytics/aggregator.go` — in-memory per-minute ring buffer (60 slots); `Record`, `Snapshot(n)`, `LastMinute`, `BlockedLastMinute`
+- [x] Metrics exposed at `GET /api/v1/metrics`:
+  - Total, blocked and allowed requests (all time + last 24 h)
+  - Real-time requests/min and blocked/min (from in-memory aggregator)
+  - 60-minute traffic timeline (`traffic_60min`)
+  - Top 10 IPs by request count (`top_ips`)
+  - Top 10 most requested paths (`top_paths`)
+  - Top 10 most triggered WAF rules (`top_rules`)
+  - Status code distribution (`status_codes`)
+  - Requests per site (`requests_per_site`)
+- [x] `GET /api/v1/metrics/prometheus` — Prometheus text format (v0.0.4); 6 metrics: `requests_total`, `requests_blocked_total`, `requests_last_24h`, `blocked_last_24h`, `requests_per_minute`, `blocked_per_minute`
+- [x] Basic alerting: `GET /api/v1/alerts` polls aggregator; raises `high_block_rate` alert when blocked/min exceeds `alert_block_threshold` setting (default 20)
+- [x] Configurable log retention: daily goroutine reads `log_retention_days` setting (default 30) and purges records older than that via `store.PurgeRequestLogs`
+- [x] Dashboard uses 60-minute sparkline from aggregator, top IPs, top paths, alerts banner, and refreshes every 30 seconds
+- [x] Tests for collector and aggregator (10 tests, all passing)
 
 ---
 
-## 🔲 Phase 9 — Full OWASP CRS Rules + Custom Rules
+## ✅ Phase 9 — Full OWASP CRS Rules + Custom Rules
 
-- [ ] Port the main OWASP Core Rule Set rules into MetalWAF's native format
-- [ ] Custom rule syntax: `{ field, operator, value, action, score }` + validation
-- [ ] Advanced operator support: `regex`, `cidr`, `startswith`, `endswith`, `not_contains`
-- [ ] Rule groups: enable/disable entire categories (SQLi, XSS, scanners, etc.)
-- [ ] Ruleset import/export in JSON
-- [ ] "Paranoia" mode with levels 1–4 (same as ModSecurity CRS)
-- [ ] Coverage tests for each attack category
+- [x] Port the main OWASP Core Rule Set rules into MetalWAF's native format
+  - XXE (5 patterns), SSRF (6 patterns), extended SQLi / XSS / RCE / Traversal / Scanner
+- [x] Custom rule syntax: `{ field, operator, value, action, score }` + validation
+- [x] Advanced operator support: `regex`, `cidr`, `startswith`, `endswith`, `not_contains`
+- [x] Rule groups: `GET /api/v1/rules/categories` returns per-category builtin/custom counts
+- [x] Ruleset import/export in JSON (`GET /api/v1/rules/export`, `POST /api/v1/rules/import`)
+- [x] "Paranoia" mode with levels 1–4 — Level field on Rule, `waf_paranoia_level` DB setting, `DefaultParanoia=2`
+- [x] Coverage tests for each attack category (27 engine tests, all passing)
+- [x] Frontend: WAFRules.jsx fully rewritten — bugs fixed (r.value, correct operators/actions), Built-in Rules tab, category badges, Import/Export buttons
+- [x] `GET /api/v1/rules/builtin` endpoint + `Settings.jsx` paranoia description
 
 ---
 
@@ -174,7 +180,7 @@ Development progress by phase. Completed tasks are marked with `[x]`.
 - [ ] End-to-end integration tests with a real server + HTTP client
 - [ ] Basic load tests (verify the proxy handles ≥ 10k req/s on modest hardware)
 - [ ] HTTP security headers on the dashboard: `CSP`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `HSTS`
-- [ ] `Makefile` with targets: `build`, `build-all` (cross-compile), `test`, `lint`, `docker`
+- [x] `Makefile` with targets: `build`, `build-all` (cross-compile), `test`, `lint`, `docker`
 - [ ] Multi-stage `Dockerfile` (Go builder + final `scratch` or `distroless` image)
 - [ ] `docker-compose.yml` for local development
 - [ ] `configs/metalwaf.service` — systemd unit file

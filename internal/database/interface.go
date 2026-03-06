@@ -33,14 +33,16 @@ type Session struct {
 }
 
 type Site struct {
-	ID        string
-	Name      string
-	Domain    string
-	WAFMode   string // detect | block | off
-	HTTPSOnly bool
-	Enabled   bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             string
+	Name           string
+	Domain         string
+	WAFMode        string // detect | block | off
+	HTTPSOnly      bool
+	Enabled        bool
+	RateLimitRPS   float64 // 0 = inherit global
+	RateLimitBurst int     // 0 = inherit global
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type Upstream struct {
@@ -66,6 +68,21 @@ type WAFRule struct {
 	Enabled     bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type IPList struct {
+	ID        string
+	SiteID    *string // nil = global
+	Type      string  // allow | block
+	CIDR      string
+	Comment   string
+	CreatedAt time.Time
+}
+
+// CountEntry is a (label, count) pair returned by analytics aggregation queries.
+type CountEntry struct {
+	Label string `json:"label"`
+	Count int64  `json:"count"`
 }
 
 type Certificate struct {
@@ -165,10 +182,22 @@ type Store interface {
 	DeleteCertificate(ctx context.Context, id string) error
 	ListCertificates(ctx context.Context) ([]*Certificate, error)
 
+	// ── IP Lists
+	CreateIPList(ctx context.Context, l *IPList) error
+	GetIPListByID(ctx context.Context, id string) (*IPList, error)
+	ListIPLists(ctx context.Context, siteID *string, listType *string) ([]*IPList, error)
+	DeleteIPList(ctx context.Context, id string) error
+
 	// ── Request Logs
 	CreateRequestLog(ctx context.Context, l *RequestLog) error
 	ListRequestLogs(ctx context.Context, f RequestLogFilter) ([]*RequestLog, error)
 	CountRequestLogs(ctx context.Context, f RequestLogFilter) (int64, error)
+	PurgeRequestLogs(ctx context.Context, before time.Time) (int64, error)
+	TopClientIPs(ctx context.Context, f RequestLogFilter, limit int) ([]CountEntry, error)
+	TopPaths(ctx context.Context, f RequestLogFilter, limit int) ([]CountEntry, error)
+	TopRules(ctx context.Context, f RequestLogFilter, limit int) ([]CountEntry, error)
+	StatusCodeDist(ctx context.Context, f RequestLogFilter) ([]CountEntry, error)
+	RequestsPerSite(ctx context.Context, f RequestLogFilter) ([]CountEntry, error)
 
 	// ── Settings
 	GetSetting(ctx context.Context, key string) (string, error)

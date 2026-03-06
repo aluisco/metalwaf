@@ -22,14 +22,16 @@ type sitesHandler struct {
 
 // siteResponse omits internal fields from the DB model.
 type siteResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Domain    string `json:"domain"`
-	WAFMode   string `json:"waf_mode"`
-	HTTPSOnly bool   `json:"https_only"`
-	Enabled   bool   `json:"enabled"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Domain         string  `json:"domain"`
+	WAFMode        string  `json:"waf_mode"`
+	HTTPSOnly      bool    `json:"https_only"`
+	Enabled        bool    `json:"enabled"`
+	RateLimitRPS   float64 `json:"rate_limit_rps"`
+	RateLimitBurst int     `json:"rate_limit_burst"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 }
 
 type upstreamResponse struct {
@@ -44,14 +46,16 @@ type upstreamResponse struct {
 
 func toSiteResp(s *database.Site) siteResponse {
 	return siteResponse{
-		ID:        s.ID,
-		Name:      s.Name,
-		Domain:    s.Domain,
-		WAFMode:   s.WAFMode,
-		HTTPSOnly: s.HTTPSOnly,
-		Enabled:   s.Enabled,
-		CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		ID:             s.ID,
+		Name:           s.Name,
+		Domain:         s.Domain,
+		WAFMode:        s.WAFMode,
+		HTTPSOnly:      s.HTTPSOnly,
+		Enabled:        s.Enabled,
+		RateLimitRPS:   s.RateLimitRPS,
+		RateLimitBurst: s.RateLimitBurst,
+		CreatedAt:      s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:      s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }
 
@@ -84,11 +88,13 @@ func (h *sitesHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type createSiteRequest struct {
-	Name      string `json:"name"`
-	Domain    string `json:"domain"`
-	WAFMode   string `json:"waf_mode"`
-	HTTPSOnly bool   `json:"https_only"`
-	Enabled   *bool  `json:"enabled"`
+	Name           string  `json:"name"`
+	Domain         string  `json:"domain"`
+	WAFMode        string  `json:"waf_mode"`
+	HTTPSOnly      bool    `json:"https_only"`
+	Enabled        *bool   `json:"enabled"`
+	RateLimitRPS   float64 `json:"rate_limit_rps"`
+	RateLimitBurst int     `json:"rate_limit_burst"`
 }
 
 func (h *sitesHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -108,11 +114,13 @@ func (h *sitesHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site := &database.Site{
-		Name:      strings.TrimSpace(req.Name),
-		Domain:    strings.ToLower(strings.TrimSpace(req.Domain)),
-		WAFMode:   req.WAFMode,
-		HTTPSOnly: req.HTTPSOnly,
-		Enabled:   enabled,
+		Name:           strings.TrimSpace(req.Name),
+		Domain:         strings.ToLower(strings.TrimSpace(req.Domain)),
+		WAFMode:        req.WAFMode,
+		HTTPSOnly:      req.HTTPSOnly,
+		Enabled:        enabled,
+		RateLimitRPS:   req.RateLimitRPS,
+		RateLimitBurst: req.RateLimitBurst,
 	}
 	if err := h.store.CreateSite(r.Context(), site); err != nil {
 		slog.Error("api: create site", "error", err)
@@ -144,11 +152,13 @@ func (h *sitesHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateSiteRequest struct {
-	Name      *string `json:"name"`
-	Domain    *string `json:"domain"`
-	WAFMode   *string `json:"waf_mode"`
-	HTTPSOnly *bool   `json:"https_only"`
-	Enabled   *bool   `json:"enabled"`
+	Name           *string  `json:"name"`
+	Domain         *string  `json:"domain"`
+	WAFMode        *string  `json:"waf_mode"`
+	HTTPSOnly      *bool    `json:"https_only"`
+	Enabled        *bool    `json:"enabled"`
+	RateLimitRPS   *float64 `json:"rate_limit_rps"`
+	RateLimitBurst *int     `json:"rate_limit_burst"`
 }
 
 func (h *sitesHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +198,12 @@ func (h *sitesHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Enabled != nil {
 		site.Enabled = *req.Enabled
+	}
+	if req.RateLimitRPS != nil {
+		site.RateLimitRPS = *req.RateLimitRPS
+	}
+	if req.RateLimitBurst != nil {
+		site.RateLimitBurst = *req.RateLimitBurst
 	}
 
 	if err := validateSiteInput(site.Name, site.Domain, site.WAFMode); err != nil {

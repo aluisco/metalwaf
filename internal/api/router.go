@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/metalwaf/metalwaf/internal/analytics"
 	"github.com/metalwaf/metalwaf/internal/auth"
 	"github.com/metalwaf/metalwaf/internal/database"
+	"github.com/metalwaf/metalwaf/internal/waf"
 )
 
 // Options configures the API router. ProxyReload, WAFReload and CertReload are
@@ -17,7 +19,9 @@ type Options struct {
 	ProxyReload func(ctx context.Context) error
 	WAFReload   func(ctx context.Context) error
 	CertReload  func(ctx context.Context) error
-	MasterKey   []byte // AES-256-GCM key for private key encryption at rest
+	MasterKey   []byte                // AES-256-GCM key for private key encryption at rest
+	Aggregator  *analytics.Aggregator // optional; nil disables real-time metrics
+	WAFEngine   *waf.Engine           // optional; nil disables built-in rule endpoints
 }
 
 // NewRouter builds and returns the complete /api/v1 handler.
@@ -28,11 +32,13 @@ func NewRouter(opts Options) http.Handler {
 
 	authH := auth.NewHandler(opts.Store, opts.Issuer)
 	sitesH := &sitesHandler{store: opts.Store, reload: opts.ProxyReload}
-	rulesH := &rulesHandler{store: opts.Store, reload: opts.WAFReload}
+	rulesH := &rulesHandler{store: opts.Store, reload: opts.WAFReload, engine: opts.WAFEngine}
 	certsH := &certsHandler{store: opts.Store, masterKey: opts.MasterKey, reload: opts.CertReload}
-	analyticsH := &analyticsHandler{store: opts.Store}
+	analyticsH := &analyticsHandler{store: opts.Store, agg: opts.Aggregator}
 	settingsH := &settingsHandler{store: opts.Store}
 	profileH := &profileHandler{store: opts.Store}
+	usersH := &usersHandler{store: opts.Store}
+	ipListH := &ipListHandler{store: opts.Store, reload: opts.ProxyReload}
 
 	iss := opts.Issuer
 
@@ -57,6 +63,20 @@ func NewRouter(opts Options) http.Handler {
 		iss.RequireAuth(http.HandlerFunc(profileH.Get)))
 	mux.Handle("PUT /api/v1/profile/password",
 		iss.RequireAuth(http.HandlerFunc(profileH.ChangePassword)))
+
+	// ── Users (admin only) ───────────────────────────────────────────────────
+	mux.Handle("GET /api/v1/users",
+		iss.RequireAdmin(http.HandlerFunc(usersH.List)))
+	mux.Handle("POST /api/v1/users",
+		iss.RequireAdmin(http.HandlerFunc(usersH.Create)))
+	mux.Handle("GET /api/v1/users/{id}",
+		iss.RequireAdmin(http.HandlerFunc(usersH.Get)))
+	mux.Handle("PUT /api/v1/users/{id}",
+		iss.RequireAdmin(http.HandlerFunc(usersH.Update)))
+	mux.Handle("DELETE /api/v1/users/{id}",
+		iss.RequireAdmin(http.HandlerFunc(usersH.Delete)))
+	mux.Handle("POST /api/v1/users/{id}/revoke-sessions",
+		iss.RequireAdmin(http.HandlerFunc(usersH.RevokeSessions)))
 
 	// ── Sites (read: any role; write: admin) ─────────────────────────────────
 	mux.Handle("GET /api/v1/sites",
@@ -85,6 +105,15 @@ func NewRouter(opts Options) http.Handler {
 		iss.RequireAuth(http.HandlerFunc(rulesH.List)))
 	mux.Handle("POST /api/v1/rules",
 		iss.RequireAdmin(http.HandlerFunc(rulesH.Create)))
+	// Static sub-paths must be registered before the {id} wildcard.
+	mux.Handle("GET /api/v1/rules/categories",
+		iss.RequireAuth(http.HandlerFunc(rulesH.Categories)))
+	mux.Handle("GET /api/v1/rules/builtin",
+		iss.RequireAuth(http.HandlerFunc(rulesH.Builtin)))
+	mux.Handle("GET /api/v1/rules/export",
+		iss.RequireAdmin(http.HandlerFunc(rulesH.Export)))
+	mux.Handle("POST /api/v1/rules/import",
+		iss.RequireAdmin(http.HandlerFunc(rulesH.Import)))
 	mux.Handle("GET /api/v1/rules/{id}",
 		iss.RequireAuth(http.HandlerFunc(rulesH.Get)))
 	mux.Handle("PUT /api/v1/rules/{id}",
@@ -97,12 +126,26 @@ func NewRouter(opts Options) http.Handler {
 		iss.RequireAuth(http.HandlerFunc(analyticsH.ListLogs)))
 	mux.Handle("GET /api/v1/metrics",
 		iss.RequireAuth(http.HandlerFunc(analyticsH.Metrics)))
+	// Prometheus scrape endpoint — registered before the /{key} wildcard to
+	// avoid ambiguity. Uses the same auth guard as the JSON metrics endpoint.
+	mux.Handle("GET /api/v1/metrics/prometheus",
+		iss.RequireAuth(http.HandlerFunc(analyticsH.Prometheus)))
+	mux.Handle("GET /api/v1/alerts",
+		iss.RequireAuth(http.HandlerFunc(analyticsH.Alerts)))
 
 	// ── Settings (admin only) ─────────────────────────────────────────────────
 	mux.Handle("GET /api/v1/settings",
 		iss.RequireAdmin(http.HandlerFunc(settingsH.GetAll)))
 	mux.Handle("PUT /api/v1/settings/{key}",
 		iss.RequireAdmin(http.HandlerFunc(settingsH.Set)))
+
+	// ── IP Lists (admin only) ─────────────────────────────────────────────────
+	mux.Handle("GET /api/v1/ip-lists",
+		iss.RequireAdmin(http.HandlerFunc(ipListH.List)))
+	mux.Handle("POST /api/v1/ip-lists",
+		iss.RequireAdmin(http.HandlerFunc(ipListH.Create)))
+	mux.Handle("DELETE /api/v1/ip-lists/{id}",
+		iss.RequireAdmin(http.HandlerFunc(ipListH.Delete)))
 
 	// ── Certificates (read: any role; write: admin) ──────────────────────────
 	// POST /letsencrypt must be registered before /{id} so it isn't swallowed

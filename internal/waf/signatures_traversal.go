@@ -8,18 +8,23 @@ func traversalRules() []Rule {
 		value  string
 		score  int
 		action string
+		level  int
 	}
 	sigs := []sig{
-		// High-confidence: block immediately.
-		{"TRAVERSAL-DOT-DOT", `(?:\.\.[\\/]){2,}`, 50, ActionBlock},
-		{"TRAVERSAL-ENCODED", `(?i)\.\.(%2f|%5c|%2F|%5C|%252f|%255c)`, 50, ActionBlock},
-		{"TRAVERSAL-NULL-BYTE", `%00`, 50, ActionBlock},
+		// ── Level 1: high confidence block ───────────────────────────────────
+		{"TRAVERSAL-DOT-DOT", `(?:\.\.[\\/]){2,}`, 50, ActionBlock, 1},
+		{"TRAVERSAL-ENCODED", `(?i)\.\.(%2f|%5c|%2F|%5C|%252f|%255c)`, 50, ActionBlock, 1},
+		{"TRAVERSAL-NULL-BYTE", `%00`, 50, ActionBlock, 1},
+		{"TRAVERSAL-LINUX-SENSITIVE", `(?i)\/(etc\/(passwd|shadow|group|hosts|sudoers)|proc\/(self|\d+)\/(environ|maps|cmdline|exe))`, 50, ActionBlock, 1},
+		{"TRAVERSAL-WIN-SENSITIVE", `(?i)(c:\\\\windows\\\\|\\\\win\.ini\b|system32\\\\cmd\.exe)`, 50, ActionBlock, 1},
 
-		// Medium-confidence: accumulate score.
-		{"TRAVERSAL-LINUX-SENSITIVE", `(?i)\/(etc\/(passwd|shadow|group|hosts|sudoers)|proc\/(self|\d+)\/(environ|maps|cmdline|exe))`, 35, ActionDetect},
-		{"TRAVERSAL-WIN-SENSITIVE", `(?i)(c:\\\\windows\\\\|\\\\win\.ini\b|system32\\\\cmd\.exe)`, 35, ActionDetect},
-		{"TRAVERSAL-WEB-CONFIG", `(?i)(\.(htaccess|htpasswd|env|git|svn|DS_Store)|web\.config)`, 25, ActionDetect},
-		{"TRAVERSAL-SINGLE-DOT-DOT", `(?:\.\.[/\\])`, 20, ActionDetect},
+		// ── Level 2: medium confidence ────────────────────────────────────────
+		{"TRAVERSAL-WEB-CONFIG", `(?i)(\.(htaccess|htpasswd|env|git|svn|DS_Store)|web\.config)`, 35, ActionDetect, 2},
+		{"TRAVERSAL-PROC-SELF", `/proc/self/(fd|root|cwd|mem|exe)`, 35, ActionDetect, 2},
+		{"TRAVERSAL-ZIP-WRAPPER", `(?i)^zip://`, 35, ActionDetect, 2},
+
+		// ── Level 3: low signal ───────────────────────────────────────────────
+		{"TRAVERSAL-SINGLE-DOT-DOT", `(?:\.\.[/\\])`, 20, ActionDetect, 3},
 	}
 
 	pathFields := []string{FieldURI, FieldQuery}
@@ -35,6 +40,7 @@ func traversalRules() []Rule {
 				Score:    s.score,
 				Action:   s.action,
 				Builtin:  true,
+				Level:    s.level,
 			})
 		}
 	}

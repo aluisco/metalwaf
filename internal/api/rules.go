@@ -2,17 +2,21 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/metalwaf/metalwaf/internal/database"
+	"github.com/metalwaf/metalwaf/internal/waf"
 )
 
 type rulesHandler struct {
 	store  database.Store
 	reload func(ctx context.Context) error // called after mutations
+	engine *waf.Engine                     // optional; nil-safe
 }
 
 type ruleResponse struct {
@@ -249,7 +253,7 @@ var (
 		"header": true, "ip": true, "user_agent": true, "method": true,
 	}
 	validOperators = map[string]bool{
-		"contains": true, "regex": true, "equals": true,
+		"contains": true, "not_contains": true, "regex": true, "equals": true,
 		"startswith": true, "endswith": true, "cidr": true,
 	}
 	validActions = map[string]bool{
@@ -268,7 +272,7 @@ func validateRuleInput(name, field, operator, action, value string, score int) e
 		return errors.New("field must be one of: uri, query, body, header, ip, user_agent, method")
 	}
 	if !validOperators[operator] {
-		return errors.New("operator must be one of: contains, regex, equals, startswith, endswith, cidr")
+		return errors.New("operator must be one of: contains, not_contains, regex, equals, startswith, endswith, cidr")
 	}
 	if !validActions[action] {
 		return errors.New("action must be one of: block, detect, allow")
@@ -283,4 +287,145 @@ func validateRuleInput(name, field, operator, action, value string, score int) e
 		return errors.New("score must be between 0 and 1000")
 	}
 	return nil
+}
+
+// ─── Category & built-in rule endpoints ──────────────────────────────────────
+
+// Categories handles GET /api/v1/rules/categories
+// Returns a breakdown of active rules by category (builtin + custom counts).
+func (h *rulesHandler) Categories(w http.ResponseWriter, r *http.Request) {
+	if h.engine == nil {
+		respond(w, http.StatusOK, []waf.CategorySummary{})
+		return
+	}
+	respond(w, http.StatusOK, h.engine.Categories())
+}
+
+// Builtin handles GET /api/v1/rules/builtin
+// Returns the list of all currently-active built-in rules (read-only).
+func (h *rulesHandler) Builtin(w http.ResponseWriter, r *http.Request) {
+	if h.engine == nil {
+		respond(w, http.StatusOK, []waf.Rule{})
+		return
+	}
+	respond(w, http.StatusOK, h.engine.BuiltinRules())
+}
+
+// ─── Import / Export ──────────────────────────────────────────────────────────
+
+type exportEnvelope struct {
+	Version    string         `json:"version"`
+	ExportedAt string         `json:"exported_at"`
+	Count      int            `json:"count"`
+	Rules      []ruleResponse `json:"rules"`
+}
+
+// Export handles GET /api/v1/rules/export
+// Returns all custom WAF rules as a JSON document suitable for re-import.
+func (h *rulesHandler) Export(w http.ResponseWriter, r *http.Request) {
+	rules, err := h.store.ListWAFRules(r.Context(), nil)
+	if err != nil {
+		slog.Error("api: export rules", "error", err)
+		respondError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	resp := make([]ruleResponse, 0, len(rules))
+	for _, ru := range rules {
+		resp = append(resp, toRuleResp(ru))
+	}
+	env := exportEnvelope{
+		Version:    "1.0",
+		ExportedAt: time.Now().UTC().Format(time.RFC3339),
+		Count:      len(resp),
+		Rules:      resp,
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=\"metalwaf-rules.json\"")
+	respond(w, http.StatusOK, env)
+}
+
+type importRuleItem struct {
+	SiteID      *string `json:"site_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Field       string  `json:"field"`
+	Operator    string  `json:"operator"`
+	Value       string  `json:"value"`
+	Action      string  `json:"action"`
+	Score       int     `json:"score"`
+	Enabled     *bool   `json:"enabled"`
+}
+
+type importRequest struct {
+	Rules []importRuleItem `json:"rules"`
+}
+
+type importResult struct {
+	Imported int      `json:"imported"`
+	Failed   int      `json:"failed"`
+	Errors   []string `json:"errors,omitempty"`
+}
+
+// Import handles POST /api/v1/rules/import
+// Bulk-creates rules from a JSON payload (same format as Export).
+// Rows that fail validation are skipped; the rest are created.
+func (h *rulesHandler) Import(w http.ResponseWriter, r *http.Request) {
+	// Accept both the raw array and the export envelope.
+	body, err := readBody(r, 1<<20) // 1 MiB limit
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "request body too large or unreadable")
+		return
+	}
+
+	// Try envelope format first, then bare array.
+	var req importRequest
+	var envelope struct {
+		Rules []importRuleItem `json:"rules"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Rules != nil {
+		req.Rules = envelope.Rules
+	} else if err2 := json.Unmarshal(body, &req.Rules); err2 != nil {
+		respondError(w, http.StatusBadRequest, "invalid import payload")
+		return
+	}
+
+	res := importResult{}
+	for _, item := range req.Rules {
+		if verr := validateRuleInput(item.Name, item.Field, item.Operator, item.Action, item.Value, item.Score); verr != nil {
+			res.Failed++
+			res.Errors = append(res.Errors, item.Name+": "+verr.Error())
+			continue
+		}
+		if item.SiteID != nil && !validUUID(*item.SiteID) {
+			res.Failed++
+			res.Errors = append(res.Errors, item.Name+": invalid site_id")
+			continue
+		}
+		enabled := true
+		if item.Enabled != nil {
+			enabled = *item.Enabled
+		}
+		rule := &database.WAFRule{
+			SiteID:      item.SiteID,
+			Name:        strings.TrimSpace(item.Name),
+			Description: strings.TrimSpace(item.Description),
+			Field:       item.Field,
+			Operator:    item.Operator,
+			Value:       item.Value,
+			Action:      item.Action,
+			Score:       item.Score,
+			Enabled:     enabled,
+		}
+		if cerr := h.store.CreateWAFRule(r.Context(), rule); cerr != nil {
+			slog.Error("api: import rule create", "name", item.Name, "error", cerr)
+			res.Failed++
+			res.Errors = append(res.Errors, item.Name+": database error")
+			continue
+		}
+		res.Imported++
+	}
+
+	if res.Imported > 0 {
+		h.triggerReload(r.Context())
+	}
+	respond(w, http.StatusOK, res)
 }

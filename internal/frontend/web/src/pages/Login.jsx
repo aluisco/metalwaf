@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Center, Paper, Title, TextInput, PasswordInput,
-  Button, Stack, Text, Alert, Group
+  Button, Stack, Text, Alert, Group, ThemeIcon
 } from '@mantine/core'
+import { IconShieldCheck } from '@tabler/icons-react'
 import { auth, setTokens } from '../api.js'
 
 export default function Login() {
@@ -36,10 +37,17 @@ export default function Login() {
 
   return (
     <Center mih="100vh">
-      <Paper shadow="md" p="xl" w={380} radius="md" withBorder>
+      <Paper shadow="xl" p="xl" w={400} radius="lg" withBorder>
         <Stack>
-          <Stack gap={4} align="center">
-            <Title order={2}>MetalWAF</Title>
+          <Stack gap={6} align="center" mb={4}>
+            <ThemeIcon
+              size={72} variant="gradient"
+              gradient={{ from: 'teal.8', to: 'cyan.4', deg: 135 }}
+              radius="xl" mb={8}
+            >
+              <IconShieldCheck size={40} stroke={1.5} />
+            </ThemeIcon>
+            <Title order={2} fw={900} style={{ letterSpacing: '-0.5px' }}>MetalWAF</Title>
             <Text c="dimmed" size="sm">
               {step === 'totp' ? 'Enter your 2FA code' : 'Sign in to your account'}
             </Text>
@@ -82,6 +90,9 @@ export default function Login() {
               </Group>
             </Stack>
           </form>
+          <Text size="xs" c="dimmed" ta="center" mt="xs">
+            MetalWAF Admin · {new Date().getFullYear()}
+          </Text>
         </Stack>
       </Paper>
     </Center>

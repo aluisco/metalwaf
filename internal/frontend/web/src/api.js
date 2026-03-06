@@ -149,11 +149,15 @@ export const sites = {
 // ── WAF Rules ─────────────────────────────────────────────────────────────────
 
 export const rules = {
-  list: (siteId) => apiFetch(`/rules${siteId ? `?site_id=${siteId}` : ''}`),
-  get: (id) => apiFetch(`/rules/${id}`),
-  create: (data) => apiFetch('/rules', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id, data) => apiFetch(`/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id) => apiFetch(`/rules/${id}`, { method: 'DELETE' }),
+  list:       (siteId) => apiFetch(`/rules${siteId ? `?site_id=${siteId}` : ''}`),
+  get:        (id)     => apiFetch(`/rules/${id}`),
+  create:     (data)   => apiFetch('/rules', { method: 'POST', body: JSON.stringify(data) }),
+  update:     (id, data) => apiFetch(`/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete:     (id)     => apiFetch(`/rules/${id}`, { method: 'DELETE' }),
+  categories: ()       => apiFetch('/rules/categories'),
+  builtin:    ()       => apiFetch('/rules/builtin'),
+  export:     ()       => apiFetch('/rules/export'),
+  import:     (data)   => apiFetch('/rules/import', { method: 'POST', body: JSON.stringify(data) }),
 }
 
 // ── Certificates ──────────────────────────────────────────────────────────────
@@ -171,12 +175,27 @@ export const certs = {
 
 export const analytics = {
   metrics: () => apiFetch('/metrics'),
+  alerts:  () => apiFetch('/alerts'),
+  prometheus: () => fetch(`/api/v1/metrics/prometheus`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}` },
+  }).then(r => r.text()),
   logs: (params = {}) => {
     const q = new URLSearchParams()
     Object.entries(params).forEach(([k, v]) => v != null && q.set(k, v))
     const qs = q.toString()
     return apiFetch(`/logs${qs ? `?${qs}` : ''}`)
   },
+}
+
+// ── Users (admin only) ──────────────────────────────────────────────────────
+
+export const users = {
+  list: () => apiFetch('/users'),
+  get: (id) => apiFetch(`/users/${id}`),
+  create: (data) => apiFetch('/users', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => apiFetch(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => apiFetch(`/users/${id}`, { method: 'DELETE' }),
+  revokeSessions: (id) => apiFetch(`/users/${id}/revoke-sessions`, { method: 'POST' }),
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -188,4 +207,18 @@ export const settings = {
       method: 'PUT',
       body: JSON.stringify({ value }),
     }),
+}
+
+// ── IP Lists (admin only) ─────────────────────────────────────────────────────
+
+export const ipLists = {
+  list: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.type) q.set('type', params.type)
+    if (params.site_id) q.set('site_id', params.site_id)
+    const qs = q.toString()
+    return apiFetch(`/ip-lists${qs ? `?${qs}` : ''}`)
+  },
+  create: (data) => apiFetch('/ip-lists', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id) => apiFetch(`/ip-lists/${id}`, { method: 'DELETE' }),
 }

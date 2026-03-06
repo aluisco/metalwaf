@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	"io/fs"
 
+	"github.com/metalwaf/metalwaf/internal/analytics"
 	"github.com/metalwaf/metalwaf/internal/api"
 	"github.com/metalwaf/metalwaf/internal/auth"
 	"github.com/metalwaf/metalwaf/internal/certificates"
@@ -35,14 +37,14 @@ import (
 const version = "0.1.0-lite"
 
 const banner = `
-  __  __      _        ___        ___    _    _____
- |  \/  | ___| |_ __ _| \ \      / / \  | |  |  ___|
- | |\/| |/ _ \ __/ _  | |\ \ /\ / / _ \ | |  | |_
- | |  | |  __/ || (_| | | \ V  V / ___ \| |__| _|
- |_|  |_|\___|\__\__,_|_|  \_/\_/_/   \_\____|_|
+   __  __      _        ___        ___     _____
+  |  \/  | ___| |_ __ _| \ \      / / \   |  ___|
+  | |\/| |/ _ \ __/ _  | |\ \ /\ / / _ \  | |_
+  | |  | |  __/ || (_| | | \ V  V / ___ \ | _|
+  |_|  |_|\___|\__\__,_|_|  \_/\_/_/   \_\|_|
 
- Reverse Proxy + Web Application Firewall  v%s
- ─────────────────────────────────────────────────
+ Reverse Proxy + Web Application Firewall v%s
+ ────────────────────────────────────────────────
 `
 
 func main() {
@@ -163,12 +165,23 @@ func main() {
 		slog.Warn("certificates: error loading from database", "error", err)
 	}
 
-	// ── Reverse proxy handler ────────────────────────────────────────────────
+	// ── Analytics aggregator + collector ──────────────────────────────
+	// The aggregator holds an in-memory per-minute ring buffer used by the
+	// dashboard for real-time charts and the alerts endpoint.
+	// The collector serialises request log writes through a single goroutine
+	// so the proxy hot path is never blocked by DB writes.
+	agg := &analytics.Aggregator{}
+	collector := analytics.New(store, agg)
+	go collector.Run(ctx)
+	slog.Info("analytics collector started")
+
+	// ── Reverse proxy handler ───────────────────────────────────────
 	proxyHandler, err := proxy.New(ctx, store)
 	if err != nil {
 		slog.Error("failed to initialize proxy", "error", err)
 		os.Exit(1)
 	}
+	proxyHandler.SetSink(collector)
 
 	// ── WAF engine ───────────────────────────────────────────────────────────
 	wafEngine := waf.New(store, waf.DefaultThreshold)
@@ -218,6 +231,8 @@ func main() {
 		WAFReload:   wafEngine.Reload,
 		CertReload:  certManager.Reload,
 		MasterKey:   masterKey,
+		Aggregator:  agg,
+		WAFEngine:   wafEngine,
 	})
 
 	// ── Admin / health server (:9090) ────────────────────────────────────────
@@ -344,6 +359,34 @@ func main() {
 			select {
 			case <-ticker.C:
 				certManager.CheckExpiry(context.Background())
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// ── Log retention goroutine ──────────────────────────────────────────────
+	// Reads the log_retention_days setting (default 30) and purges request_logs
+	// entries older than that many days. Runs once per day.
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				retDays := 30
+				if s, err := store.GetSetting(context.Background(), "log_retention_days"); err == nil && s != "" {
+					if n, err := strconv.Atoi(s); err == nil && n > 0 {
+						retDays = n
+					}
+				}
+				before := time.Now().UTC().AddDate(0, 0, -retDays)
+				n, err := store.PurgeRequestLogs(context.Background(), before)
+				if err != nil {
+					slog.Warn("log retention: purge error", "error", err)
+				} else if n > 0 {
+					slog.Info("log retention: purged old request logs", "count", n, "retention_days", retDays)
+				}
 			case <-ctx.Done():
 				return
 			}

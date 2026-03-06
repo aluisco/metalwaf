@@ -134,8 +134,64 @@ func (m *routerMockStore) ListRequestLogs(_ context.Context, _ database.RequestL
 	return []*database.RequestLog{}, nil
 }
 
+func (m *routerMockStore) PurgeRequestLogs(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (m *routerMockStore) TopClientIPs(_ context.Context, _ database.RequestLogFilter, _ int) ([]database.CountEntry, error) {
+	return []database.CountEntry{}, nil
+}
+
+func (m *routerMockStore) TopPaths(_ context.Context, _ database.RequestLogFilter, _ int) ([]database.CountEntry, error) {
+	return []database.CountEntry{}, nil
+}
+
+func (m *routerMockStore) TopRules(_ context.Context, _ database.RequestLogFilter, _ int) ([]database.CountEntry, error) {
+	return []database.CountEntry{}, nil
+}
+
+func (m *routerMockStore) StatusCodeDist(_ context.Context, _ database.RequestLogFilter) ([]database.CountEntry, error) {
+	return []database.CountEntry{}, nil
+}
+
+func (m *routerMockStore) RequestsPerSite(_ context.Context, _ database.RequestLogFilter) ([]database.CountEntry, error) {
+	return []database.CountEntry{}, nil
+}
+
+func (m *routerMockStore) GetSetting(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
 func (m *routerMockStore) ListCertificates(_ context.Context) ([]*database.Certificate, error) {
 	return []*database.Certificate{}, nil
+}
+
+func (m *routerMockStore) ListUsers(_ context.Context) ([]*database.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*database.User, 0, len(m.users))
+	for _, u := range m.users {
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+func (m *routerMockStore) CreateUser(_ context.Context, u *database.User) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.users[u.Username] = u
+	return nil
+}
+
+func (m *routerMockStore) DeleteUser(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, u := range m.users {
+		if u.ID == id {
+			delete(m.users, k)
+		}
+	}
+	return nil
 }
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
@@ -407,6 +463,58 @@ func TestRouter_Refresh_ReturnsNewTokens(t *testing.T) {
 	json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["access_token"] == nil {
 		t.Error("refresh did not return access_token")
+	}
+}
+
+// ─── Users endpoint ───────────────────────────────────────────────────────────
+
+func TestRouter_Users_List_Admin_Returns200(t *testing.T) {
+	router, _, _ := setupRouter(t)
+	at, _ := loginAs(t, router, "adminuser", "admin-secret-password")
+
+	rr := doRequest(t, router, http.MethodGet, "/api/v1/users", nil, at)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	data, ok := resp["data"]
+	if !ok {
+		t.Fatal("response missing 'data' key")
+	}
+	arr, ok := data.([]any)
+	if !ok {
+		t.Fatalf("'data' should be an array, got %T", data)
+	}
+	// setupRouter seeds 2 users (adminuser + vieweruser)
+	if len(arr) != 2 {
+		t.Errorf("expected 2 users, got %d", len(arr))
+	}
+}
+
+func TestRouter_Users_List_Viewer_Returns403(t *testing.T) {
+	router, _, _ := setupRouter(t)
+	at, _ := loginAs(t, router, "vieweruser", "viewer-secret-pass")
+
+	rr := doRequest(t, router, http.MethodGet, "/api/v1/users", nil, at)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for viewer on /users, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRouter_Users_Create_Admin_Returns201(t *testing.T) {
+	router, _, _ := setupRouter(t)
+	at, _ := loginAs(t, router, "adminuser", "admin-secret-password")
+
+	rr := doRequest(t, router, http.MethodPost, "/api/v1/users", map[string]string{
+		"username": "newuser",
+		"password": "newpassword123456",
+		"role":     "viewer",
+	}, at)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d — body: %s", rr.Code, rr.Body.String())
 	}
 }
 

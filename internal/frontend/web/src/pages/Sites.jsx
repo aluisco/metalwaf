@@ -6,6 +6,7 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
+import ConfirmModal from '../components/ConfirmModal.jsx'
 
 const WAF_MODES = [
   { value: 'off',    label: 'Off'    },
@@ -31,6 +32,8 @@ export default function Sites() {
   const [upList,    setUpList]    = useState([])
   const [currentUp, setCurrentUp] = useState(null)
   const [upForm,    setUpForm]    = useState(EMPTY_UP)
+  const [delSite,   setDelSite]   = useState(null)
+  const [delUp,     setDelUp]     = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -52,7 +55,6 @@ export default function Sites() {
   }
 
   async function deleteSite(s) {
-    if (!confirm(`Delete site "${s.name}"?`)) return
     try { await api.delete(s.id); load(); notifications.show({ message: 'Site deleted', color: 'teal' }) }
     catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
   }
@@ -78,7 +80,6 @@ export default function Sites() {
   }
 
   async function deleteUpstream(u) {
-    if (!confirm(`Delete upstream "${u.url}"?`)) return
     try { await api.deleteUpstream(panelSite.id, u.id); api.listUpstreams(panelSite.id).then(setUpList) }
     catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
   }
@@ -120,7 +121,7 @@ export default function Sites() {
                   <Group gap="xs">
                     <Button size="xs" variant="light" onClick={() => startEdit(s)}>Edit</Button>
                     <Button size="xs" variant="light" color="blue" onClick={() => openUpstreams(s)}>Upstreams</Button>
-                    <Button size="xs" variant="light" color="red"  onClick={() => deleteSite(s)}>Delete</Button>
+                    <Button size="xs" variant="light" color="red"  onClick={() => setDelSite(s)}>Delete</Button>
                   </Group>
                 </Table.Td>
               </Table.Tr>
@@ -168,7 +169,7 @@ export default function Sites() {
                     <Table.Td>
                       <Group gap="xs">
                         <Button size="xs" variant="light" onClick={() => startEditUp(u)}>Edit</Button>
-                        <Button size="xs" variant="light" color="red" onClick={() => deleteUpstream(u)}>✕</Button>
+                        <Button size="xs" variant="light" color="red" onClick={() => setDelUp(u)}>✕</Button>
                       </Group>
                     </Table.Td>
                   </Table.Tr>
@@ -193,6 +194,21 @@ export default function Sites() {
           </Stack>
         </form>
       </Modal>
+
+      <ConfirmModal
+        opened={!!delSite}
+        onClose={() => setDelSite(null)}
+        onConfirm={() => deleteSite(delSite)}
+        title="Delete site"
+        message={`Delete site "${delSite?.name}"? All upstreams and rules will be removed.`}
+      />
+      <ConfirmModal
+        opened={!!delUp}
+        onClose={() => setDelUp(null)}
+        onConfirm={() => deleteUpstream(delUp)}
+        title="Delete upstream"
+        message={`Delete upstream "${delUp?.url}"?`}
+      />
     </Stack>
   )
 }

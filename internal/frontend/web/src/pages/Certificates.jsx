@@ -6,6 +6,7 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
+import ConfirmModal from '../components/ConfirmModal.jsx'
 
 export default function Certificates() {
   const [list, setList]       = useState([])
@@ -16,6 +17,7 @@ export default function Certificates() {
   const [acmeOpened,   { open: openAcme,   close: closeAcme   }] = useDisclosure()
   const [upForm, setUpForm]   = useState({ cert_pem:'', key_pem:'', auto_renew:false })
   const [acmeDomain, setAcmeDomain] = useState('')
+  const [delTarget, setDelTarget] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -46,7 +48,6 @@ export default function Certificates() {
   }
 
   async function remove(c) {
-    if (!confirm(`Revoke certificate for "${c.domain}"?`)) return
     try { await api.delete(c.id); load(); notifications.show({ message: 'Certificate revoked', color: 'teal' }) }
     catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
   }
@@ -84,7 +85,7 @@ export default function Certificates() {
                 <Table.Td><ExpiryBadge expiry={c.expires_at}/></Table.Td>
                 <Table.Td>{c.auto_renew ? '✓' : '—'}</Table.Td>
                 <Table.Td>
-                  <Button size="xs" variant="light" color="red" onClick={() => remove(c)}>Revoke</Button>
+                  <Button size="xs" variant="light" color="red" onClick={() => setDelTarget(c)}>Revoke</Button>
                 </Table.Td>
               </Table.Tr>
             ))}
@@ -147,6 +148,15 @@ export default function Certificates() {
           </Stack>
         </form>
       </Modal>
+
+      <ConfirmModal
+        opened={!!delTarget}
+        onClose={() => setDelTarget(null)}
+        onConfirm={() => remove(delTarget)}
+        title="Revoke certificate"
+        confirmLabel="Revoke"
+        message={`Revoke certificate for "${delTarget?.domain}"? This cannot be undone.`}
+      />
     </Stack>
   )
 }

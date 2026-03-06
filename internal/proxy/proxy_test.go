@@ -27,6 +27,14 @@ func (m *mockStore) ListUpstreamsBySite(_ context.Context, siteID string) ([]*da
 	return m.upstreams[siteID], nil
 }
 
+func (m *mockStore) CreateRequestLog(_ context.Context, _ *database.RequestLog) error {
+	return nil // no-op in tests
+}
+
+func (m *mockStore) ListIPLists(_ context.Context, _ *string, _ *string) ([]*database.IPList, error) {
+	return nil, nil // no entries in tests
+}
+
 // newTestHandler builds a Handler from the given mock store.
 func newTestHandler(t *testing.T, store *mockStore) *Handler {
 	t.Helper()

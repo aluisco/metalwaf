@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -20,6 +22,11 @@ import (
 // DefaultThreshold is the anomaly score at which a request is blocked.
 // Individual ActionBlock rules bypass this threshold.
 const DefaultThreshold = 100
+
+// DefaultParanoia is the paranoia level used when no setting is configured.
+// Level 2 includes high-confidence block rules and medium-confidence detect
+// rules (behaviour equivalent to the pre-Phase-9 baseline).
+const DefaultParanoia = 2
 
 // blocked403 is the HTML page returned to clients whose requests are blocked.
 const blocked403 = `<!DOCTYPE html>
@@ -83,6 +90,8 @@ func matchValue(cr compiledRule, input string) bool {
 	switch cr.Operator {
 	case OpContains:
 		return strings.Contains(strings.ToLower(input), strings.ToLower(cr.Value))
+	case OpNotContains:
+		return !strings.Contains(strings.ToLower(input), strings.ToLower(cr.Value))
 	case OpEquals:
 		return strings.EqualFold(input, cr.Value)
 	case OpStartsWith:
@@ -126,6 +135,7 @@ type Engine struct {
 	mu        sync.RWMutex
 	all       []compiledRule // builtin + custom, ready to iterate
 	threshold int
+	paranoia  int // active paranoia level (1–4)
 }
 
 // New creates an Engine with the built-in rule set pre-loaded.
@@ -134,8 +144,8 @@ func New(store database.Store, threshold int) *Engine {
 	if threshold <= 0 {
 		threshold = DefaultThreshold
 	}
-	e := &Engine{store: store, threshold: threshold}
-	e.all = compileAll(allBuiltinRules(), nil)
+	e := &Engine{store: store, threshold: threshold, paranoia: DefaultParanoia}
+	e.all = compileAll(allBuiltinRules(), nil, e.paranoia)
 	return e
 }
 
@@ -154,6 +164,16 @@ func (e *Engine) Reload(ctx context.Context) error {
 		return fmt.Errorf("waf reload: %w", err)
 	}
 
+	// Read paranoia level from settings; keep current level on error.
+	paranoia := e.paranoia
+	if e.store != nil {
+		if s, serr := e.store.GetSetting(ctx, "waf_paranoia_level"); serr == nil && s != "" {
+			if n, nerr := strconv.Atoi(s); nerr == nil && n >= 1 && n <= 4 {
+				paranoia = n
+			}
+		}
+	}
+
 	var custom []Rule
 	for _, r := range dbRules {
 		if r.Enabled {
@@ -161,27 +181,34 @@ func (e *Engine) Reload(ctx context.Context) error {
 		}
 	}
 
-	compiled := compileAll(allBuiltinRules(), custom)
+	compiled := compileAll(allBuiltinRules(), custom, paranoia)
 
 	e.mu.Lock()
 	e.all = compiled
+	e.paranoia = paranoia
 	e.mu.Unlock()
 
 	slog.Info("waf: rules loaded",
 		"builtin", len(allBuiltinRules()),
 		"custom", len(custom),
 		"total", len(compiled),
+		"paranoia_level", paranoia,
 	)
 	return nil
 }
 
 // compileAll combines built-in and custom rules into a compiled slice.
-func compileAll(builtin, custom []Rule) []compiledRule {
+// Built-in rules with Level > paranoia are skipped (Level 0 = always include).
+func compileAll(builtin, custom []Rule, paranoia int) []compiledRule {
 	out := make([]compiledRule, 0, len(builtin)+len(custom))
 	for _, r := range builtin {
+		if r.Level > 0 && r.Level > paranoia {
+			continue
+		}
 		out = append(out, compileRule(r))
 	}
 	for _, r := range custom {
+		// Custom rules have Level==0 and are always included.
 		out = append(out, compileRule(r))
 	}
 	return out
@@ -195,6 +222,8 @@ func allBuiltinRules() []Rule {
 	rules = append(rules, rceRules()...)
 	rules = append(rules, traversalRules()...)
 	rules = append(rules, scannerRules()...)
+	rules = append(rules, xxeRules()...)
+	rules = append(rules, ssrfRules()...)
 	return rules
 }
 
@@ -273,6 +302,81 @@ func (e *Engine) Inspect(r *http.Request, site *database.Site) *InspectResult {
 	}
 
 	return result
+}
+
+// ─── Additional Engine methods ────────────────────────────────────────────────
+
+// SetParanoiaLevel updates the paranoia level and triggers recompilation.
+// Safe to call at runtime; takes effect immediately.
+func (e *Engine) SetParanoiaLevel(level int) {
+	if level < 1 {
+		level = 1
+	}
+	if level > 4 {
+		level = 4
+	}
+	e.mu.Lock()
+	e.paranoia = level
+	e.mu.Unlock()
+}
+
+// ParanoiaLevel returns the current paranoia level.
+func (e *Engine) ParanoiaLevel() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.paranoia
+}
+
+// CategorySummary holds the rule count breakdown for one category.
+type CategorySummary struct {
+	Category string `json:"category"`
+	Builtin  int    `json:"builtin"`
+	Custom   int    `json:"custom"`
+	Total    int    `json:"total"`
+}
+
+// Categories returns a summary of compiled rules grouped by category.
+func (e *Engine) Categories() []CategorySummary {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	type kv struct{ b, c int }
+	m := make(map[string]*kv)
+	for _, cr := range e.all {
+		if _, ok := m[cr.Category]; !ok {
+			m[cr.Category] = &kv{}
+		}
+		if cr.Builtin {
+			m[cr.Category].b++
+		} else {
+			m[cr.Category].c++
+		}
+	}
+
+	out := make([]CategorySummary, 0, len(m))
+	for cat, cnt := range m {
+		out = append(out, CategorySummary{
+			Category: cat,
+			Builtin:  cnt.b,
+			Custom:   cnt.c,
+			Total:    cnt.b + cnt.c,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Category < out[j].Category })
+	return out
+}
+
+// BuiltinRules returns a snapshot of all currently-active built-in rules.
+func (e *Engine) BuiltinRules() []Rule {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	var out []Rule
+	for _, cr := range e.all {
+		if cr.Builtin {
+			out = append(out, cr.Rule)
+		}
+	}
+	return out
 }
 
 // WriteBlocked writes the 403 Forbidden response to w.

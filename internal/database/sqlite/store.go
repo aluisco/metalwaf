@@ -251,12 +251,12 @@ func (s *Store) PruneExpiredSessions(ctx context.Context) error {
 
 // ─── Sites ────────────────────────────────────────────────────────────────────
 
-const siteSelect = `SELECT id, name, domain, waf_mode, https_only, enabled, created_at, updated_at FROM sites`
+const siteSelect = `SELECT id, name, domain, waf_mode, https_only, enabled, rate_limit_rps, rate_limit_burst, created_at, updated_at FROM sites`
 
 func (s *Store) CreateSite(ctx context.Context, site *database.Site) error {
 	const q = `
-		INSERT INTO sites (id, name, domain, waf_mode, https_only, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		INSERT INTO sites (id, name, domain, waf_mode, https_only, enabled, rate_limit_rps, rate_limit_burst, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if site.ID == "" {
 		site.ID = newID()
 	}
@@ -265,6 +265,7 @@ func (s *Store) CreateSite(ctx context.Context, site *database.Site) error {
 	_, err := s.db.ExecContext(ctx, q,
 		site.ID, site.Name, site.Domain, site.WAFMode,
 		boolInt(site.HTTPSOnly), boolInt(site.Enabled),
+		site.RateLimitRPS, site.RateLimitBurst,
 		site.CreatedAt, site.UpdatedAt,
 	)
 	return err
@@ -280,12 +281,14 @@ func (s *Store) GetSiteByDomain(ctx context.Context, domain string) (*database.S
 
 func (s *Store) UpdateSite(ctx context.Context, site *database.Site) error {
 	const q = `
-		UPDATE sites SET name=?, domain=?, waf_mode=?, https_only=?, enabled=?, updated_at=?
+		UPDATE sites SET name=?, domain=?, waf_mode=?, https_only=?, enabled=?,
+		               rate_limit_rps=?, rate_limit_burst=?, updated_at=?
 		WHERE id=?`
 	site.UpdatedAt = time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, q,
 		site.Name, site.Domain, site.WAFMode,
 		boolInt(site.HTTPSOnly), boolInt(site.Enabled),
+		site.RateLimitRPS, site.RateLimitBurst,
 		site.UpdatedAt, site.ID,
 	)
 	return err
@@ -317,7 +320,8 @@ func scanSite(row *sql.Row) (*database.Site, error) {
 	var site database.Site
 	var httpsOnly, enabled int
 	err := row.Scan(&site.ID, &site.Name, &site.Domain, &site.WAFMode,
-		&httpsOnly, &enabled, &site.CreatedAt, &site.UpdatedAt)
+		&httpsOnly, &enabled, &site.RateLimitRPS, &site.RateLimitBurst,
+		&site.CreatedAt, &site.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -333,7 +337,8 @@ func scanSiteRow(rows *sql.Rows) (*database.Site, error) {
 	var site database.Site
 	var httpsOnly, enabled int
 	err := rows.Scan(&site.ID, &site.Name, &site.Domain, &site.WAFMode,
-		&httpsOnly, &enabled, &site.CreatedAt, &site.UpdatedAt)
+		&httpsOnly, &enabled, &site.RateLimitRPS, &site.RateLimitBurst,
+		&site.CreatedAt, &site.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -686,7 +691,7 @@ func (s *Store) CountRequestLogs(ctx context.Context, f database.RequestLogFilte
 	return count, s.db.QueryRowContext(ctx, q, args...).Scan(&count)
 }
 
-func buildLogQuery(selectClause string, f database.RequestLogFilter) (string, []any) {
+func buildLogWhere(f database.RequestLogFilter) (string, []any) {
 	var conds []string
 	var args []any
 	if f.SiteID != nil {
@@ -709,11 +714,15 @@ func buildLogQuery(selectClause string, f database.RequestLogFilter) (string, []
 		conds = append(conds, "timestamp<=?")
 		args = append(args, *f.To)
 	}
-	q := selectClause + " FROM request_logs"
-	if len(conds) > 0 {
-		q += " WHERE " + strings.Join(conds, " AND ")
+	if len(conds) == 0 {
+		return "", args
 	}
-	return q, args
+	return " WHERE " + strings.Join(conds, " AND "), args
+}
+
+func buildLogQuery(selectClause string, f database.RequestLogFilter) (string, []any) {
+	where, args := buildLogWhere(f)
+	return selectClause + " FROM request_logs" + where, args
 }
 
 func scanLogRow(rows *sql.Rows) (*database.RequestLog, error) {
@@ -738,6 +747,176 @@ func scanLogRow(rows *sql.Rows) (*database.RequestLog, error) {
 	l.Query = query.String
 	l.Blocked = intToBool(blocked)
 	return &l, nil
+}
+
+// ─── IP Lists ─────────────────────────────────────────────────────────────────
+
+func (s *Store) CreateIPList(ctx context.Context, l *database.IPList) error {
+	const q = `
+		INSERT INTO ip_lists (id, site_id, type, cidr, comment, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`
+	if l.ID == "" {
+		l.ID = newID()
+	}
+	l.CreatedAt = time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, q,
+		l.ID, nullStr(l.SiteID), l.Type, l.CIDR, l.Comment, l.CreatedAt,
+	)
+	return err
+}
+
+func (s *Store) GetIPListByID(ctx context.Context, id string) (*database.IPList, error) {
+	const q = `SELECT id, site_id, type, cidr, comment, created_at FROM ip_lists WHERE id=?`
+	return scanIPList(s.db.QueryRowContext(ctx, q, id))
+}
+
+// ListIPLists returns entries filtered by optional siteID and/or listType.
+// Pass nil to skip that filter.
+func (s *Store) ListIPLists(ctx context.Context, siteID *string, listType *string) ([]*database.IPList, error) {
+	var conds []string
+	var args []any
+	if siteID != nil {
+		conds = append(conds, "site_id=?")
+		args = append(args, *siteID)
+	}
+	if listType != nil {
+		conds = append(conds, "type=?")
+		args = append(args, *listType)
+	}
+	q := `SELECT id, site_id, type, cidr, comment, created_at FROM ip_lists`
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	q += " ORDER BY created_at"
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []*database.IPList
+	for rows.Next() {
+		entry, err := scanIPListRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, entry)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) DeleteIPList(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM ip_lists WHERE id=?`, id)
+	return err
+}
+
+func scanIPList(row *sql.Row) (*database.IPList, error) {
+	var l database.IPList
+	var siteID sql.NullString
+	err := row.Scan(&l.ID, &siteID, &l.Type, &l.CIDR, &l.Comment, &l.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if siteID.Valid {
+		l.SiteID = &siteID.String
+	}
+	return &l, nil
+}
+
+func scanIPListRow(rows *sql.Rows) (*database.IPList, error) {
+	var l database.IPList
+	var siteID sql.NullString
+	err := rows.Scan(&l.ID, &siteID, &l.Type, &l.CIDR, &l.Comment, &l.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if siteID.Valid {
+		l.SiteID = &siteID.String
+	}
+	return &l, nil
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+// PurgeRequestLogs deletes all request_logs entries older than before.
+// Returns the number of deleted rows.
+func (s *Store) PurgeRequestLogs(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM request_logs WHERE timestamp < ?`, before)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s *Store) TopClientIPs(ctx context.Context, f database.RequestLogFilter, limit int) ([]database.CountEntry, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	where, args := buildLogWhere(f)
+	q := "SELECT client_ip AS label, COUNT(*) AS cnt FROM request_logs" + where +
+		" GROUP BY client_ip ORDER BY cnt DESC LIMIT ?"
+	args = append(args, limit)
+	return queryCountEntries(ctx, s.db, q, args...)
+}
+
+func (s *Store) TopPaths(ctx context.Context, f database.RequestLogFilter, limit int) ([]database.CountEntry, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	where, args := buildLogWhere(f)
+	q := "SELECT path AS label, COUNT(*) AS cnt FROM request_logs" + where +
+		" GROUP BY path ORDER BY cnt DESC LIMIT ?"
+	args = append(args, limit)
+	return queryCountEntries(ctx, s.db, q, args...)
+}
+
+func (s *Store) TopRules(ctx context.Context, f database.RequestLogFilter, limit int) ([]database.CountEntry, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	where, args := buildLogWhere(f)
+	extra := " AND rule_id IS NOT NULL"
+	if where == "" {
+		extra = " WHERE rule_id IS NOT NULL"
+	}
+	q := "SELECT rule_id AS label, COUNT(*) AS cnt FROM request_logs" + where + extra +
+		" GROUP BY rule_id ORDER BY cnt DESC LIMIT ?"
+	args = append(args, limit)
+	return queryCountEntries(ctx, s.db, q, args...)
+}
+
+func (s *Store) StatusCodeDist(ctx context.Context, f database.RequestLogFilter) ([]database.CountEntry, error) {
+	where, args := buildLogWhere(f)
+	q := "SELECT CAST(status_code AS TEXT) AS label, COUNT(*) AS cnt FROM request_logs" + where +
+		" GROUP BY status_code ORDER BY cnt DESC"
+	return queryCountEntries(ctx, s.db, q, args...)
+}
+
+func (s *Store) RequestsPerSite(ctx context.Context, f database.RequestLogFilter) ([]database.CountEntry, error) {
+	where, args := buildLogWhere(f)
+	q := "SELECT COALESCE(site_id, 'global') AS label, COUNT(*) AS cnt FROM request_logs" + where +
+		" GROUP BY site_id ORDER BY cnt DESC"
+	return queryCountEntries(ctx, s.db, q, args...)
+}
+
+// queryCountEntries runs q with args and scans (label, cnt) rows into []CountEntry.
+func queryCountEntries(ctx context.Context, db *sql.DB, q string, args ...any) ([]database.CountEntry, error) {
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []database.CountEntry
+	for rows.Next() {
+		var e database.CountEntry
+		if err := rows.Scan(&e.Label, &e.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

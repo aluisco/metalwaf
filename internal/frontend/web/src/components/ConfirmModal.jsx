@@ -1,51 +1,31 @@
-import { Modal, Text, Group, Button, Stack, ThemeIcon } from '@mantine/core'
-import { IconAlertTriangle } from '@tabler/icons-react'
+import {
+  CModal, CModalHeader, CModalTitle, CModalBody, CModalFooter,
+  CButton, CAlert,
+} from '@coreui/react'
 
 /**
- * ConfirmModal — a reusable confirmation dialog.
- *
- * Usage:
- *   const [target, setTarget] = useState(null)
- *
- *   <Button onClick={() => setTarget(item)}>Delete</Button>
- *   <ConfirmModal
- *     opened={!!target}
- *     onClose={() => setTarget(null)}
- *     onConfirm={() => doDelete(target)}
- *     title="Delete site"
- *     message={`Delete "${target?.name}"? This cannot be undone.`}
- *   />
+ * props: opened, onClose, onConfirm, title, message,
+ *        confirmLabel = "Confirm", confirmColor = "danger"
  */
 export default function ConfirmModal({
   opened,
   onClose,
   onConfirm,
-  title = 'Are you sure?',
+  title = 'Confirm action',
   message,
-  confirmLabel = 'Delete',
-  confirmColor = 'red',
+  confirmLabel = 'Confirm',
+  confirmColor = 'danger',
 }) {
-  function handleConfirm() {
-    onConfirm()
-    onClose()
-  }
-
   return (
-    <Modal opened={opened} onClose={onClose} title={title} size="sm" centered withCloseButton>
-      <Stack gap="md">
-        <Group gap="sm" align="flex-start" wrap="nowrap">
-          <ThemeIcon color="red" variant="light" size={36} radius="xl" style={{ flexShrink: 0 }}>
-            <IconAlertTriangle size={20} />
-          </ThemeIcon>
-          <Text size="sm" style={{ paddingTop: 6 }}>
-            {message}
-          </Text>
-        </Group>
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
-          <Button color={confirmColor} onClick={handleConfirm}>{confirmLabel}</Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <CModal visible={opened} onClose={onClose} alignment="center">
+      <CModalHeader><CModalTitle>{title}</CModalTitle></CModalHeader>
+      <CModalBody>
+        {message && <p className="mb-0">{message}</p>}
+      </CModalBody>
+      <CModalFooter>
+        <CButton color="secondary" variant="outline" onClick={onClose}>Cancel</CButton>
+        <CButton color={confirmColor} onClick={() => { onConfirm(); onClose() }}>{confirmLabel}</CButton>
+      </CModalFooter>
+    </CModal>
   )
 }

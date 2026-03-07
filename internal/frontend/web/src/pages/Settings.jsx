@@ -1,21 +1,22 @@
 import { useEffect, useState } from 'react'
 import { settings as api } from '../api.js'
 import {
-  Stack, Title, Table, Text, TextInput, Button, Group, Badge, Skeleton, Alert
-} from '@mantine/core'
-import { notifications } from '@mantine/notifications'
+  CAlert, CSpinner, CButton, CFormInput,
+  CTable, CTableHead, CTableBody, CTableRow, CTableHeaderCell, CTableDataCell,
+} from '@coreui/react'
+import { notifications } from '../lib/notifications.js'
 
 const DESCRIPTIONS = {
   waf_block_score:       'Min threat score to block a request (0–100)',
   waf_detect_score:      'Min threat score to log (not block) a request',
-  waf_paranoia_level:    'WAF paranoia level: 1=essential, 2=moderate (default), 3=aggressive, 4=paranoid',
-  alert_block_threshold: 'Blocked requests/minute threshold to trigger alerts (default 20)',
+  waf_paranoia_level:    'WAF paranoia level: 1=essential, 2=moderate, 3=aggressive, 4=paranoid',
+  alert_block_threshold: 'Blocked requests/minute to trigger alerts (default 20)',
   rate_limit_rps:        'Burst request rate per IP (req/sec)',
   rate_limit_window:     'Window in seconds for rate-limit counting',
   log_retention_days:    'How many days access logs are kept',
   upstream_timeout:      'Timeout in seconds for upstream HTTP calls',
   health_check_interval: 'Upstream health check interval in seconds',
-  acme_email:            'Contact email for Let\'s Encrypt account',
+  acme_email:            "Contact email for Let's Encrypt account",
 }
 
 export default function Settings() {
@@ -51,55 +52,55 @@ export default function Settings() {
     } finally { setSaving(s => ({...s,[key]:false})) }
   }
 
-  if (loading) return <Skeleton h={300} />
-  if (error)   return <Alert color="red">{error}</Alert>
+  if (loading) return <div className="text-center py-5"><CSpinner color="primary" /></div>
+  if (error)   return <CAlert color="danger">{error}</CAlert>
 
   const keys = Object.keys(map).length > 0 ? Object.keys(map) : Object.keys(DESCRIPTIONS)
 
   return (
-    <Stack>
-      <Title order={2}>Settings</Title>
-      <Table withTableBorder withColumnBorders>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Key</Table.Th><Table.Th>Value</Table.Th>
-            <Table.Th>Description</Table.Th><Table.Th w={140}/>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
+    <>
+      <h2 className="mb-4 fw-semibold">Settings</h2>
+      <CTable bordered hover responsive>
+        <CTableHead>
+          <CTableRow>
+            <CTableHeaderCell>Key</CTableHeaderCell>
+            <CTableHeaderCell>Value</CTableHeaderCell>
+            <CTableHeaderCell>Description</CTableHeaderCell>
+            <CTableHeaderCell style={{ width: 140 }}></CTableHeaderCell>
+          </CTableRow>
+        </CTableHead>
+        <CTableBody>
           {keys.map(key => {
             const isEditing = key in editing
             return (
-              <Table.Tr key={key}>
-                <Table.Td><Text ff="monospace" size="sm">{key}</Text></Table.Td>
-                <Table.Td>
+              <CTableRow key={key}>
+                <CTableDataCell><code>{key}</code></CTableDataCell>
+                <CTableDataCell>
                   {isEditing ? (
-                    <TextInput
-                      size="xs" value={editing[key]}
+                    <CFormInput size="sm" value={editing[key]}
                       onChange={e => setEditing(d=>({...d,[key]:e.target.value}))}
                       onKeyDown={e => { if (e.key==='Enter') save(key); if (e.key==='Escape') cancelEdit(key) }}
-                      autoFocus
-                    />
+                      autoFocus />
                   ) : (
-                    <Text ff="monospace" size="sm">{String(map[key] ?? '')}</Text>
+                    <code>{String(map[key] ?? '')}</code>
                   )}
-                </Table.Td>
-                <Table.Td><Text size="xs" c="dimmed">{DESCRIPTIONS[key] ?? ''}</Text></Table.Td>
-                <Table.Td>
+                </CTableDataCell>
+                <CTableDataCell><small className="text-body-secondary">{DESCRIPTIONS[key] ?? ''}</small></CTableDataCell>
+                <CTableDataCell>
                   {isEditing ? (
-                    <Group gap="xs">
-                      <Button size="xs" loading={saving[key]} onClick={() => save(key)}>Save</Button>
-                      <Button size="xs" variant="default" onClick={() => cancelEdit(key)}>Cancel</Button>
-                    </Group>
+                    <div className="d-flex gap-1">
+                      <CButton size="sm" color="primary" disabled={saving[key]} onClick={() => save(key)}>{saving[key] ? '…' : 'Save'}</CButton>
+                      <CButton size="sm" color="secondary" variant="outline" onClick={() => cancelEdit(key)}>Cancel</CButton>
+                    </div>
                   ) : (
-                    <Button size="xs" variant="subtle" onClick={() => startEdit(key)}>Edit</Button>
+                    <CButton size="sm" color="secondary" variant="ghost" onClick={() => startEdit(key)}>Edit</CButton>
                   )}
-                </Table.Td>
-              </Table.Tr>
+                </CTableDataCell>
+              </CTableRow>
             )
           })}
-        </Table.Tbody>
-      </Table>
-    </Stack>
+        </CTableBody>
+      </CTable>
+    </>
   )
 }

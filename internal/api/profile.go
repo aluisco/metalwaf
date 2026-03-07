@@ -126,6 +126,39 @@ func (h *profileHandler) ChangePassword(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+type updateProfileRequest struct {
+	Email string `json:"email"`
+}
+
+// Update handles PUT /api/v1/profile — lets any authenticated user update their own email.
+func (h *profileHandler) Update(w http.ResponseWriter, r *http.Request) {
+	c := auth.ClaimsFromCtx(r.Context())
+	if c == nil {
+		respondError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	var req updateProfileRequest
+	if err := decode(r, &req, 1024); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	user, err := h.store.GetUserByID(r.Context(), c.UserID)
+	if err != nil || user == nil {
+		respondError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if req.Email != "" {
+		user.Email = req.Email
+	}
+	if err := h.store.UpdateUser(r.Context(), user); err != nil {
+		slog.Error("api: update profile", "error", err)
+		respondError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	slog.Info("api: profile updated", "user_id", user.ID)
+	respond(w, http.StatusOK, toUserResp(user))
+}
+
 func validateNewPassword(p string) error {
 	if len(p) < 12 {
 		return errors.New("new_password must be at least 12 characters")

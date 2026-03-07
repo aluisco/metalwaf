@@ -33,6 +33,23 @@ export function isLoggedIn() {
   return !!getRefreshToken()
 }
 
+/**
+ * Call once at app startup. If a refresh token exists in localStorage,
+ * proactively exchange it for an access token so all subsequent API calls
+ * work without an extra round-trip (and avoids the race condition on load).
+ */
+export async function initializeAuth() {
+  if (!getRefreshToken()) return false
+  if (_accessToken) return true
+  try {
+    await _refresh()
+    return true
+  } catch {
+    clearTokens()
+    return false
+  }
+}
+
 // ── Core fetch wrapper ────────────────────────────────────────────────────────
 
 async function _refresh() {
@@ -117,6 +134,7 @@ export const auth = {
 
 export const profile = {
   get: () => apiFetch('/profile'),
+  update: (data) => apiFetch('/profile', { method: 'PUT', body: JSON.stringify(data) }),
   changePassword: (current_password, new_password) =>
     apiFetch('/profile/password', {
       method: 'PUT',
@@ -212,12 +230,9 @@ export const settings = {
 // ── IP Lists (admin only) ─────────────────────────────────────────────────────
 
 export const ipLists = {
-  list: (params = {}) => {
-    const q = new URLSearchParams()
-    if (params.type) q.set('type', params.type)
-    if (params.site_id) q.set('site_id', params.site_id)
-    const qs = q.toString()
-    return apiFetch(`/ip-lists${qs ? `?${qs}` : ''}`)
+  list: (listName) => {
+    const qs = listName ? `?list=${encodeURIComponent(listName)}` : ''
+    return apiFetch(`/ip-lists${qs}`)
   },
   create: (data) => apiFetch('/ip-lists', { method: 'POST', body: JSON.stringify(data) }),
   delete: (id) => apiFetch(`/ip-lists/${id}`, { method: 'DELETE' }),

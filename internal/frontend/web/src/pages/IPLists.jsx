@@ -1,246 +1,163 @@
 import { useEffect, useState } from 'react'
-import { ipLists as api, sites as sitesApi } from '../api.js'
+import { ipLists as api } from '../api.js'
 import {
-  Stack, Title, Group, Button, Table, Tabs, Badge, Modal,
-  TextInput, Select, Text, Skeleton, Alert, Tooltip, ActionIcon,
-} from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
-import { IconShieldLock, IconPlus, IconTrash, IconAlertCircle } from '@tabler/icons-react'
-import ConfirmModal from '../components/ConfirmModal.jsx'
+  CAlert, CSpinner, CBadge, CButton, CFormInput, CFormLabel, CFormSelect,
+  CNav, CNavItem, CNavLink, CTabContent, CTabPane,
+  CModal, CModalHeader, CModalTitle, CModalBody, CModalFooter,
+  CTable, CTableHead, CTableBody, CTableRow, CTableHeaderCell, CTableDataCell,
+} from '@coreui/react'
+import { notifications } from '../lib/notifications.js'
+import { useDisclosure } from '../lib/use-disclosure.js'
 
-const EMPTY = { type: 'block', cidr: '', comment: '', site_id: null }
+const LISTS = ['blocklist', 'allowlist']
+
+function typeBadge(t) {
+  const colors = { cidr:'primary', ip:'secondary', country:'info', asn:'warning' }
+  return <CBadge color={colors[t] ?? 'secondary'}>{t}</CBadge>
+}
 
 export default function IPLists() {
-  const [list, setList]           = useState([])
-  const [siteList, setSiteList]   = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState('')
-  const [saving, setSaving]       = useState(false)
-  const [activeTab, setActiveTab] = useState('block')
-  const [form, setForm]           = useState(EMPTY)
-  const [opened, { open, close }] = useDisclosure()
-  const [delTarget, setDelTarget] = useState(null)
+  const [tab,     setTab]    = useState('blocklist')
+  const [entries, setEntries] = useState({ blocklist: [], allowlist: [] })
+  const [loading, setLoading] = useState({ blocklist: true, allowlist: true })
+  const [error,   setError]   = useState('')
+  const [form,    setForm]    = useState({ value:'', type:'ip', note:'' })
+  const [saving,  setSaving]  = useState(false)
+  const [addOpen, { open: openAdd, close: closeAdd }] = useDisclosure(false)
 
-  useEffect(() => {
-    sitesApi.list().then(setSiteList).catch(() => {})
-  }, [])
-
-  const load = () => {
-    setLoading(true)
-    api.list()
-      .then(rows => setList(rows ?? []))
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }
-  useEffect(load, [])
-
-  const filtered = list.filter(e => e.type === activeTab)
-
-  function startCreate() {
-    setForm({ ...EMPTY, type: activeTab })
-    open()
+  function loadList(list) {
+    setLoading(l => ({...l, [list]: true}))
+    api.list(list).then(data => {
+      setEntries(e => ({...e, [list]: Array.isArray(data) ? data : []}))
+    }).catch(e => setError(e.message)).finally(() => setLoading(l => ({...l, [list]: false})))
   }
 
-  async function save(e) {
+  useEffect(() => { LISTS.forEach(loadList) }, [])
+
+  async function handleAdd(e) {
     e.preventDefault()
-    if (!form.cidr.trim()) {
-      notifications.show({ color: 'red', message: 'IP / CIDR is required' })
-      return
-    }
     setSaving(true)
     try {
-      await api.create({
-        type: form.type,
-        cidr: form.cidr.trim(),
-        comment: form.comment.trim(),
-        site_id: form.site_id || null,
-      })
-      notifications.show({ color: 'green', message: 'Entry added' })
-      close()
-      load()
+      await api.create({ list: tab, ...form })
+      notifications.show({ message: `Entry added to ${tab}`, color: 'teal' })
+      closeAdd()
+      setForm({ value:'', type:'ip', note:'' })
+      loadList(tab)
     } catch (err) {
-      notifications.show({ color: 'red', message: err.message })
-    } finally {
-      setSaving(false)
-    }
+      notifications.show({ title: 'Error', message: err.message, color: 'red' })
+    } finally { setSaving(false) }
   }
 
-  async function confirmDelete() {
-    if (!delTarget) return
+  async function deleteEntry(id) {
     try {
-      await api.delete(delTarget.id)
-      notifications.show({ color: 'green', message: 'Entry removed' })
-      setDelTarget(null)
-      load()
+      await api.delete(id)
+      notifications.show({ message: 'Entry removed', color: 'teal' })
+      loadList(tab)
     } catch (err) {
-      notifications.show({ color: 'red', message: err.message })
+      notifications.show({ title: 'Error', message: err.message, color: 'red' })
     }
   }
 
-  const siteOptions = [
-    { value: '', label: '— Global (all sites) —' },
-    ...siteList.map(s => ({ value: s.id, label: s.name })),
-  ]
+  const rows = entries[tab] ?? []
+  const isLoading = loading[tab]
 
   return (
-    <Stack gap="lg">
-      <Group justify="space-between">
-        <Group gap="sm">
-          <IconShieldLock size={28} />
-          <Title order={2}>IP Access Control</Title>
-        </Group>
-        <Button leftSection={<IconPlus size={16} />} onClick={startCreate}>
-          Add Entry
-        </Button>
-      </Group>
+    <>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2 className="fw-semibold mb-0">IP Access Lists</h2>
+        <CButton color="primary" onClick={openAdd}>Add Entry</CButton>
+      </div>
 
-      {error && (
-        <Alert icon={<IconAlertCircle size={16} />} color="red" title="Error">
-          {error}
-        </Alert>
-      )}
+      {error && <CAlert color="danger">{error}</CAlert>}
 
-      <Tabs value={activeTab} onChange={setActiveTab}>
-        <Tabs.List>
-          <Tabs.Tab value="block">
-            <Badge color="red" variant="light" mr={6}>
-              {list.filter(e => e.type === 'block').length}
-            </Badge>
-            Blocklist
-          </Tabs.Tab>
-          <Tabs.Tab value="allow">
-            <Badge color="green" variant="light" mr={6}>
-              {list.filter(e => e.type === 'allow').length}
-            </Badge>
-            Allowlist
-          </Tabs.Tab>
-        </Tabs.List>
+      <CNav variant="tabs" className="mb-3">
+        {LISTS.map(l => (
+          <CNavItem key={l}>
+            <CNavLink active={tab === l} onClick={() => setTab(l)} style={{ cursor:'pointer' }}>
+              {l === 'blocklist' ? 'Blocklist' : 'Allowlist'}
+              {' '}
+              <CBadge color={l==='blocklist'?'danger':'success'} className="ms-1">
+                {entries[l].length}
+              </CBadge>
+            </CNavLink>
+          </CNavItem>
+        ))}
+      </CNav>
 
-        <Tabs.Panel value={activeTab} pt="md">
-          {loading ? (
-            <Stack gap="xs">
-              {[...Array(4)].map((_, i) => <Skeleton key={i} height={36} />)}
-            </Stack>
+      <CTabContent>
+        <CTabPane visible>
+          {isLoading ? (
+            <div className="text-center py-5"><CSpinner color="primary" /></div>
           ) : (
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>IP / CIDR</Table.Th>
-                  <Table.Th>Scope</Table.Th>
-                  <Table.Th>Comment</Table.Th>
-                  <Table.Th>Added</Table.Th>
-                  <Table.Th w={60} />
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {filtered.length === 0 ? (
-                  <Table.Tr>
-                    <Table.Td colSpan={5}>
-                      <Text ta="center" c="dimmed" py="xl">
-                        No {activeTab}list entries yet
-                      </Text>
-                    </Table.Td>
-                  </Table.Tr>
-                ) : filtered.map(entry => {
-                  const site = siteList.find(s => s.id === entry.site_id)
-                  return (
-                    <Table.Tr key={entry.id}>
-                      <Table.Td>
-                        <Text ff="monospace">{entry.cidr}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        {site
-                          ? <Badge variant="outline">{site.name}</Badge>
-                          : <Badge color="gray" variant="light">Global</Badge>}
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" c={entry.comment ? undefined : 'dimmed'}>
-                          {entry.comment || '—'}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="xs" c="dimmed">
-                          {new Date(entry.created_at).toLocaleDateString()}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Tooltip label="Remove">
-                          <ActionIcon
-                            color="red"
-                            variant="subtle"
-                            onClick={() => setDelTarget(entry)}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Table.Td>
-                    </Table.Tr>
-                  )
-                })}
-              </Table.Tbody>
-            </Table>
+            <CTable bordered hover responsive>
+              <CTableHead>
+                <CTableRow>
+                  <CTableHeaderCell>Value</CTableHeaderCell>
+                  <CTableHeaderCell>Type</CTableHeaderCell>
+                  <CTableHeaderCell>Note</CTableHeaderCell>
+                  <CTableHeaderCell>Added</CTableHeaderCell>
+                  <CTableHeaderCell></CTableHeaderCell>
+                </CTableRow>
+              </CTableHead>
+              <CTableBody>
+                {rows.length === 0 ? (
+                  <CTableRow>
+                    <CTableDataCell colSpan={5} className="text-center text-body-secondary py-4">
+                      {tab === 'blocklist' ? 'Blocklist is empty' : 'Allowlist is empty'}
+                    </CTableDataCell>
+                  </CTableRow>
+                ) : rows.map(r => (
+                  <CTableRow key={r.id}>
+                    <CTableDataCell><code>{r.value}</code></CTableDataCell>
+                    <CTableDataCell>{typeBadge(r.type)}</CTableDataCell>
+                    <CTableDataCell><small className="text-body-secondary">{r.note ?? '—'}</small></CTableDataCell>
+                    <CTableDataCell><small>{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</small></CTableDataCell>
+                    <CTableDataCell>
+                      <CButton size="sm" color="danger" variant="ghost" onClick={() => deleteEntry(r.id)}>Remove</CButton>
+                    </CTableDataCell>
+                  </CTableRow>
+                ))}
+              </CTableBody>
+            </CTable>
           )}
-        </Tabs.Panel>
-      </Tabs>
+        </CTabPane>
+      </CTabContent>
 
       {/* Add modal */}
-      <Modal
-        opened={opened}
-        onClose={close}
-        title={<Group gap="xs"><IconShieldLock size={18} /><Text fw={600}>Add IP List Entry</Text></Group>}
-      >
-        <form onSubmit={save}>
-          <Stack gap="sm">
-            <Select
-              label="Type"
-              data={[
-                { value: 'block', label: 'Block — deny access' },
-                { value: 'allow', label: 'Allow — bypass WAF & rate limit' },
-              ]}
-              value={form.type}
-              onChange={v => setForm(f => ({ ...f, type: v }))}
-              required
-            />
-            <TextInput
-              label="IP or CIDR"
-              placeholder="e.g. 1.2.3.4 or 10.0.0.0/8"
-              value={form.cidr}
-              onChange={e => setForm(f => ({ ...f, cidr: e.target.value }))}
-              required
-            />
-            <Select
-              label="Scope"
-              description="Leave blank to apply globally to all sites"
-              data={siteOptions}
-              value={form.site_id ?? ''}
-              onChange={v => setForm(f => ({ ...f, site_id: v || null }))}
-              clearable
-            />
-            <TextInput
-              label="Comment"
-              placeholder="Optional note"
-              value={form.comment}
-              onChange={e => setForm(f => ({ ...f, comment: e.target.value }))}
-            />
-            <Group justify="flex-end" mt="md">
-              <Button variant="default" onClick={close}>Cancel</Button>
-              <Button type="submit" loading={saving}>Add Entry</Button>
-            </Group>
-          </Stack>
+      <CModal visible={addOpen} onClose={closeAdd}>
+        <CModalHeader>
+          <CModalTitle>Add to {tab === 'blocklist' ? 'Blocklist' : 'Allowlist'}</CModalTitle>
+        </CModalHeader>
+        <form onSubmit={handleAdd}>
+          <CModalBody>
+            <div className="mb-3">
+              <CFormLabel>Type</CFormLabel>
+              <CFormSelect value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value}))}>
+                <option value="ip">IP address</option>
+                <option value="cidr">CIDR range</option>
+                <option value="country">Country code</option>
+                <option value="asn">ASN</option>
+              </CFormSelect>
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Value</CFormLabel>
+              <CFormInput
+                placeholder={form.type==='cidr'?'192.168.0.0/24':form.type==='country'?'US':form.type==='asn'?'AS12345':'192.168.1.1'}
+                value={form.value} required
+                onChange={e => setForm(f => ({...f, value: e.target.value}))} />
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Note <small className="text-body-secondary">(optional)</small></CFormLabel>
+              <CFormInput placeholder="e.g. Known scanner" value={form.note}
+                onChange={e => setForm(f => ({...f, note: e.target.value}))} />
+            </div>
+          </CModalBody>
+          <CModalFooter>
+            <CButton color="secondary" variant="outline" type="button" onClick={closeAdd}>Cancel</CButton>
+            <CButton color="primary" type="submit" disabled={saving}>{saving ? <CSpinner size="sm" /> : 'Add'}</CButton>
+          </CModalFooter>
         </form>
-      </Modal>
-
-      {/* Delete confirm */}
-      <ConfirmModal
-        opened={!!delTarget}
-        onClose={() => setDelTarget(null)}
-        onConfirm={confirmDelete}
-        title="Remove IP List Entry"
-        message={delTarget ? `Remove ${delTarget.type}list entry for ${delTarget.cidr}?` : ''}
-        confirmLabel="Remove"
-        confirmColor="red"
-      />
-    </Stack>
+      </CModal>
+    </>
   )
 }

@@ -1,179 +1,175 @@
 import { useEffect, useState } from 'react'
 import { certs as api } from '../api.js'
 import {
-  Stack, Title, Group, Button, Table, Badge, Modal,
-  Textarea, TextInput, Checkbox, Text, Skeleton, Alert
-} from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
-import ConfirmModal from '../components/ConfirmModal.jsx'
+  CAlert, CSpinner, CBadge, CButton, CFormInput, CFormLabel, CFormTextarea,
+  CModal, CModalHeader, CModalTitle, CModalBody, CModalFooter,
+  CTable, CTableHead, CTableBody, CTableRow, CTableHeaderCell, CTableDataCell,
+} from '@coreui/react'
+import { notifications } from '../lib/notifications.js'
+import { useDisclosure } from '../lib/use-disclosure.js'
 
-export default function Certificates() {
-  const [list, setList]       = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState('')
-  const [saving, setSaving]   = useState(false)
-  const [uploadOpened, { open: openUpload, close: closeUpload }] = useDisclosure()
-  const [acmeOpened,   { open: openAcme,   close: closeAcme   }] = useDisclosure()
-  const [upForm, setUpForm]   = useState({ cert_pem:'', key_pem:'', auto_renew:false })
-  const [acmeDomain, setAcmeDomain] = useState('')
-  const [delTarget, setDelTarget] = useState(null)
+function expiryBadge(expiry) {
+  if (!expiry) return <CBadge color="secondary">Unknown</CBadge>
+  const days = Math.ceil((new Date(expiry) - Date.now()) / 86400000)
+  if (days < 0)   return <CBadge color="danger">Expired</CBadge>
+  if (days < 14)  return <CBadge color="warning">{days}d left</CBadge>
+  return <CBadge color="success">{new Date(expiry).toLocaleDateString()}</CBadge>
+}
 
-  const load = () => {
-    setLoading(true)
-    api.list().then(setList).catch(e => setError(e.message)).finally(() => setLoading(false))
-  }
-  useEffect(load, [])
-
-  async function uploadCert(e) {
-    e.preventDefault(); setSaving(true)
-    try {
-      await api.upload(upForm)
-      closeUpload()
-      setUpForm({ cert_pem:'', key_pem:'', auto_renew:false })
-      load()
-      notifications.show({ message: 'Certificate uploaded', color: 'teal' })
-    } catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
-    finally { setSaving(false) }
-  }
-
-  async function requestACME(e) {
-    e.preventDefault(); setSaving(true)
-    try {
-      await api.requestACME({ domain: acmeDomain })
-      closeAcme(); setAcmeDomain(''); load()
-      notifications.show({ message: 'Certificate requested', color: 'teal' })
-    } catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
-    finally { setSaving(false) }
-  }
-
-  async function remove(c) {
-    try { await api.delete(c.id); load(); notifications.show({ message: 'Certificate revoked', color: 'teal' }) }
-    catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
-  }
-
-  if (loading) return <Skeleton h={200} />
-  if (error)   return <Alert color="red">{error}</Alert>
-
+function Empty() {
   return (
-    <Stack>
-      <Group justify="space-between">
-        <Title order={2}>Certificates</Title>
-        <Group gap="sm">
-          <Button size="sm" variant="default" onClick={openAcme}>
-            Request Let&apos;s Encrypt
-          </Button>
-          <Button size="sm" onClick={openUpload}>+ Upload</Button>
-        </Group>
-      </Group>
-
-      {list.length === 0 ? (
-        <Text c="dimmed">No certificates found.</Text>
-      ) : (
-        <Table striped withTableBorder withColumnBorders>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Domain</Table.Th><Table.Th>Source</Table.Th>
-              <Table.Th>Expires</Table.Th><Table.Th>Auto-Renew</Table.Th><Table.Th>Actions</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {list.map(c => (
-              <Table.Tr key={c.id}>
-                <Table.Td><Text ff="monospace" size="sm">{c.domain}</Text></Table.Td>
-                <Table.Td><SourceBadge source={c.source}/></Table.Td>
-                <Table.Td><ExpiryBadge expiry={c.expires_at}/></Table.Td>
-                <Table.Td>{c.auto_renew ? '✓' : '—'}</Table.Td>
-                <Table.Td>
-                  <Button size="xs" variant="light" color="red" onClick={() => setDelTarget(c)}>Revoke</Button>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
-
-      {/* Upload modal */}
-      <Modal opened={uploadOpened} onClose={closeUpload} title="Upload certificate">
-        <form onSubmit={uploadCert}>
-          <Stack>
-            <Textarea
-              label="Certificate PEM" rows={6}
-              styles={{ input: { fontFamily: 'monospace', fontSize: 11 } }}
-              placeholder="-----BEGIN CERTIFICATE-----"
-              value={upForm.cert_pem}
-              onChange={e => setUpForm(f=>({...f,cert_pem:e.target.value}))}
-              required
-            />
-            <Textarea
-              label="Private key PEM" rows={6}
-              styles={{ input: { fontFamily: 'monospace', fontSize: 11 } }}
-              placeholder="-----BEGIN EC PRIVATE KEY-----"
-              value={upForm.key_pem}
-              onChange={e => setUpForm(f=>({...f,key_pem:e.target.value}))}
-              required
-            />
-            <Checkbox
-              label="Auto-renew when possible"
-              checked={upForm.auto_renew}
-              onChange={e => setUpForm(f=>({...f,auto_renew:e.target.checked}))}
-            />
-            <Group justify="flex-end">
-              <Button variant="default" onClick={closeUpload}>Cancel</Button>
-              <Button type="submit" loading={saving}>Upload</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
-
-      {/* ACME modal */}
-      <Modal opened={acmeOpened} onClose={closeAcme} title="Request Let's Encrypt certificate">
-        <form onSubmit={requestACME}>
-          <Stack>
-            <TextInput
-              label="Domain (must be publicly reachable)"
-              placeholder="example.com"
-              value={acmeDomain}
-              onChange={e => setAcmeDomain(e.target.value)}
-              required
-            />
-            <Text size="xs" c="dimmed">
-              MetalWAF will complete an HTTP-01 or TLS-ALPN-01 challenge.
-              Make sure the domain resolves to this server on port 80 or 443.
-            </Text>
-            <Group justify="flex-end">
-              <Button variant="default" onClick={closeAcme}>Cancel</Button>
-              <Button type="submit" loading={saving}>Request</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
-
-      <ConfirmModal
-        opened={!!delTarget}
-        onClose={() => setDelTarget(null)}
-        onConfirm={() => remove(delTarget)}
-        title="Revoke certificate"
-        confirmLabel="Revoke"
-        message={`Revoke certificate for "${delTarget?.domain}"? This cannot be undone.`}
-      />
-    </Stack>
+    <tr>
+      <td colSpan={5} className="text-center text-body-secondary py-4">No certificates found</td>
+    </tr>
   )
 }
 
-function SourceBadge({ source }) {
-  if (source === 'letsencrypt') return <Badge color="blue" variant="light">Let&apos;s Encrypt</Badge>
-  if (source === 'self_signed') return <Badge color="gray" variant="light">self-signed</Badge>
-  return <Badge color="gray" variant="light">{source ?? 'manual'}</Badge>
-}
+export default function Certificates() {
+  const [certs,    setCerts]   = useState([])
+  const [loading, setLoading]  = useState(true)
+  const [error,   setError]    = useState('')
+  const [form,    setForm]     = useState({ domain:'', cert:'', key:'' })
+  const [acme,    setAcme]     = useState({ domain:'' })
+  const [saving,  setSaving]   = useState(false)
+  const [uploadOpen, { open: openUpload, close: closeUpload }] = useDisclosure(false)
+  const [acmeOpen,   { open: openAcme,   close: closeAcme   }] = useDisclosure(false)
 
-function ExpiryBadge({ expiry }) {
-  if (!expiry) return <Badge color="gray" variant="light">unknown</Badge>
-  const ms   = new Date(expiry) - Date.now()
-  const days = Math.floor(ms / 86_400_000)
-  const label = `${days}d`
-  if (days < 0)  return <Badge color="red" variant="light">expired</Badge>
-  if (days < 14) return <Badge color="red" variant="light">{label}</Badge>
-  if (days < 30) return <Badge color="yellow" variant="light">{label}</Badge>
-  return <Badge color="teal" variant="light">{label}</Badge>
+  function load() {
+    setLoading(true)
+    api.list().then(setCerts).catch(e => setError(e.message)).finally(() => setLoading(false))
+  }
+  useEffect(load, [])
+
+  async function handleUpload(e) {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await api.upload(form)
+      notifications.show({ message: 'Certificate uploaded', color: 'teal' })
+      closeUpload()
+      load()
+    } catch (err) {
+      notifications.show({ title: 'Error', message: err.message, color: 'red' })
+    } finally { setSaving(false) }
+  }
+
+  async function handleAcme(e) {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await api.requestACME(acme.domain)
+      notifications.show({ message: 'ACME cert requested — check back soon', color: 'teal' })
+      closeAcme()
+      load()
+    } catch (err) {
+      notifications.show({ title: 'Error', message: err.message, color: 'red' })
+    } finally { setSaving(false) }
+  }
+
+  async function deleteCert(id) {
+    try {
+      await api.delete(id)
+      notifications.show({ message: 'Certificate deleted', color: 'teal' })
+      load()
+    } catch (err) {
+      notifications.show({ title: 'Error', message: err.message, color: 'red' })
+    }
+  }
+
+  return (
+    <>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2 className="fw-semibold mb-0">Certificates</h2>
+        <div className="d-flex gap-2">
+          <CButton color="secondary" variant="outline" onClick={openAcme}>Request ACME</CButton>
+          <CButton color="primary" onClick={openUpload}>Upload Certificate</CButton>
+        </div>
+      </div>
+
+      {error && <CAlert color="danger">{error}</CAlert>}
+      {loading ? (
+        <div className="text-center py-5"><CSpinner color="primary" /></div>
+      ) : (
+        <CTable bordered hover responsive>
+          <CTableHead>
+            <CTableRow>
+              <CTableHeaderCell>Domain</CTableHeaderCell>
+              <CTableHeaderCell>Source</CTableHeaderCell>
+              <CTableHeaderCell>Expiry</CTableHeaderCell>
+              <CTableHeaderCell>Alt Names</CTableHeaderCell>
+              <CTableHeaderCell></CTableHeaderCell>
+            </CTableRow>
+          </CTableHead>
+          <CTableBody>
+            {certs.length === 0 ? <Empty /> : certs.map(c => (
+              <CTableRow key={c.id}>
+                <CTableDataCell>{c.domain}</CTableDataCell>
+                <CTableDataCell>
+                  <CBadge color={c.source === 'acme' ? 'info' : 'secondary'}>{c.source ?? 'manual'}</CBadge>
+                </CTableDataCell>
+                <CTableDataCell>{expiryBadge(c.expires_at ?? c.expiry)}</CTableDataCell>
+                <CTableDataCell>
+                  <small className="text-body-secondary">{(c.alt_names ?? []).join(', ') || '—'}</small>
+                </CTableDataCell>
+                <CTableDataCell>
+                  <CButton size="sm" color="danger" variant="ghost" onClick={() => deleteCert(c.id)}>Delete</CButton>
+                </CTableDataCell>
+              </CTableRow>
+            ))}
+          </CTableBody>
+        </CTable>
+      )}
+
+      {/* Upload modal */}
+      <CModal visible={uploadOpen} onClose={closeUpload} size="lg">
+        <CModalHeader><CModalTitle>Upload Certificate</CModalTitle></CModalHeader>
+        <form onSubmit={handleUpload}>
+          <CModalBody>
+            <div className="mb-3">
+              <CFormLabel>Domain</CFormLabel>
+              <CFormInput placeholder="example.com" value={form.domain} required
+                onChange={e => setForm(f => ({...f, domain: e.target.value}))} />
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Certificate (PEM)</CFormLabel>
+              <CFormTextarea rows={6} placeholder="-----BEGIN CERTIFICATE-----" value={form.cert} required
+                onChange={e => setForm(f => ({...f, cert: e.target.value}))}
+                style={{ fontFamily: 'monospace', fontSize: 12 }} />
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Private Key (PEM)</CFormLabel>
+              <CFormTextarea rows={6} placeholder="-----BEGIN PRIVATE KEY-----" value={form.key} required
+                onChange={e => setForm(f => ({...f, key: e.target.value}))}
+                style={{ fontFamily: 'monospace', fontSize: 12 }} />
+            </div>
+          </CModalBody>
+          <CModalFooter>
+            <CButton color="secondary" variant="outline" type="button" onClick={closeUpload}>Cancel</CButton>
+            <CButton color="primary" type="submit" disabled={saving}>{saving ? <CSpinner size="sm" /> : 'Upload'}</CButton>
+          </CModalFooter>
+        </form>
+      </CModal>
+
+      {/* ACME modal */}
+      <CModal visible={acmeOpen} onClose={closeAcme}>
+        <CModalHeader><CModalTitle>Request Let&apos;s Encrypt Certificate</CModalTitle></CModalHeader>
+        <form onSubmit={handleAcme}>
+          <CModalBody>
+            <div className="mb-3">
+              <CFormLabel>Domain</CFormLabel>
+              <CFormInput placeholder="example.com" value={acme.domain} required
+                onChange={e => setAcme({ domain: e.target.value })} />
+            </div>
+            <CAlert color="info" className="small mb-0">
+              The domain must resolve to this server. Port 80 must be reachable for the HTTP-01 challenge.
+            </CAlert>
+          </CModalBody>
+          <CModalFooter>
+            <CButton color="secondary" variant="outline" type="button" onClick={closeAcme}>Cancel</CButton>
+            <CButton color="primary" type="submit" disabled={saving}>{saving ? <CSpinner size="sm" /> : 'Request'}</CButton>
+          </CModalFooter>
+        </form>
+      </CModal>
+    </>
+  )
 }

@@ -1,35 +1,29 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { users as api } from '../api.js'
 import {
-  Stack, Title, Group, Button, Table, Badge, Modal,
-  TextInput, PasswordInput, Select, Text, Skeleton, Alert,
-  Avatar, ThemeIcon, Tooltip, ActionIcon, Box
-} from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
-import {
-  IconUsers, IconPlus, IconPencil, IconTrash,
-  IconShieldLock, IconDeviceFloppy
-} from '@tabler/icons-react'
+  CButton, CAlert, CSpinner, CBadge,
+  CTable, CTableHead, CTableBody, CTableRow, CTableHeaderCell, CTableDataCell,
+  CModal, CModalHeader, CModalTitle, CModalBody, CModalFooter,
+  CForm, CFormLabel, CFormInput, CFormSelect,
+  CTooltip,
+} from '@coreui/react'
+import CIcon from '@coreui/icons-react'
+import { cilPencil, cilTrash, cilShieldAlt, cilPlus } from '@coreui/icons'
+import { useDisclosure } from '../lib/use-disclosure.js'
+import { notifications } from '../lib/notifications.js'
 import ConfirmModal from '../components/ConfirmModal.jsx'
-
-const ROLE_OPTIONS = [
-  { value: 'admin',  label: 'Admin'  },
-  { value: 'viewer', label: 'Viewer' },
-]
 
 const EMPTY = { username: '', email: '', password: '', role: 'viewer' }
 
-function initials(username) {
-  return username.slice(0, 2).toUpperCase()
-}
+function initials(u) { return u.slice(0, 2).toUpperCase() }
 
 export default function Users() {
+  const navigate = useNavigate()
   const [list, setList]           = useState([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
   const [saving, setSaving]       = useState(false)
-  const [current, setCurrent]     = useState(null)
   const [form, setForm]           = useState(EMPTY)
   const [opened, { open, close }] = useDisclosure()
   const [delTarget, setDelTarget] = useState(null)
@@ -40,27 +34,14 @@ export default function Users() {
   }
   useEffect(load, [])
 
-  function startCreate() { setCurrent(null); setForm(EMPTY); open() }
-  function startEdit(u) {
-    setCurrent(u)
-    setForm({ username: u.username, email: u.email ?? '', password: '', role: u.role })
-    open()
-  }
+  function startCreate() { setForm(EMPTY); open() }
 
   async function save(e) {
     e.preventDefault(); setSaving(true)
     try {
-      const payload = { email: form.email, role: form.role }
-      if (!current) {
-        // Create: all fields required
-        await api.create({ ...payload, username: form.username, password: form.password })
-      } else {
-        // Update: password optional (only if filled)
-        if (form.password) payload.password = form.password
-        await api.update(current.id, payload)
-      }
+      await api.create({ username: form.username, email: form.email, role: form.role, password: form.password })
       close(); load()
-      notifications.show({ message: current ? 'User updated' : 'User created', color: 'teal' })
+      notifications.show({ message: 'User created', color: 'teal' })
     } catch (err) {
       notifications.show({ title: 'Error', message: err.message, color: 'red' })
     } finally { setSaving(false) }
@@ -84,175 +65,128 @@ export default function Users() {
     }
   }
 
-  if (loading) return <Skeleton h={300} />
+  if (loading) return <div className="text-center py-5"><CSpinner color="primary" /></div>
 
   return (
-    <Stack>
-      <Group justify="space-between">
-        <Group gap="xs">
-          <ThemeIcon size={32} variant="light" color="violet" radius="md">
-            <IconUsers size={18} />
-          </ThemeIcon>
-          <Title order={2}>Users</Title>
-        </Group>
-        <Button size="sm" leftSection={<IconPlus size={15} />} onClick={startCreate}>
-          New user
-        </Button>
-      </Group>
+    <>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2 className="mb-0 fw-semibold">Users</h2>
+        <CButton color="primary" onClick={startCreate}>
+          <CIcon icon={cilPlus} className="me-1" /> New user
+        </CButton>
+      </div>
 
-      {error && <Alert color="red">{error}</Alert>}
+      {error && <CAlert color="danger">{error}</CAlert>}
 
       {list.length === 0 ? (
-        <Text c="dimmed">No users found.</Text>
+        <p className="text-body-secondary">No users found.</p>
       ) : (
-        <Table striped withTableBorder withColumnBorders highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>User</Table.Th>
-              <Table.Th>Email</Table.Th>
-              <Table.Th>Role</Table.Th>
-              <Table.Th>2FA</Table.Th>
-              <Table.Th>Created</Table.Th>
-              <Table.Th w={140}>Actions</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
+        <CTable bordered striped hover responsive>
+          <CTableHead>
+            <CTableRow>
+              <CTableHeaderCell>User</CTableHeaderCell>
+              <CTableHeaderCell>Email</CTableHeaderCell>
+              <CTableHeaderCell>Role</CTableHeaderCell>
+              <CTableHeaderCell>2FA</CTableHeaderCell>
+              <CTableHeaderCell>Created</CTableHeaderCell>
+              <CTableHeaderCell style={{ width: 140 }}>Actions</CTableHeaderCell>
+            </CTableRow>
+          </CTableHead>
+          <CTableBody>
             {list.map(u => (
-              <Table.Tr
-                key={u.id}
-                style={{ cursor: 'pointer' }}
-                onClick={() => startEdit(u)}
-              >
-                <Table.Td>
-                  <Group gap="sm">
-                    <Avatar
-                      size={32} radius="xl" color="teal" variant="light"
+              <CTableRow key={u.id}>
+                <CTableDataCell>
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      className="rounded-circle bg-primary bg-opacity-25 d-flex align-items-center justify-content-center fw-bold"
+                      style={{ width: 32, height: 32, fontSize: 12 }}
                     >
                       {initials(u.username)}
-                    </Avatar>
-                    <Text size="sm" fw={600}>{u.username}</Text>
-                  </Group>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm" c={u.email ? undefined : 'dimmed'}>{u.email || '—'}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <RoleBadge role={u.role} />
-                </Table.Td>
-                <Table.Td>
-                  <Badge
-                    size="sm"
-                    color={u.totp_enabled ? 'teal' : 'gray'}
-                    variant={u.totp_enabled ? 'light' : 'outline'}
-                  >
+                    </div>
+                    <strong>{u.username}</strong>
+                  </div>
+                </CTableDataCell>
+                <CTableDataCell>{u.email || <span className="text-body-secondary">—</span>}</CTableDataCell>
+                <CTableDataCell><RoleBadge role={u.role} /></CTableDataCell>
+                <CTableDataCell>
+                  <CBadge color={u.totp_enabled ? 'success' : 'secondary'}>
                     {u.totp_enabled ? '2FA on' : '2FA off'}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" c="dimmed">
+                  </CBadge>
+                </CTableDataCell>
+                <CTableDataCell>
+                  <small className="text-body-secondary">
                     {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
-                  </Text>
-                </Table.Td>
-                <Table.Td onClick={e => e.stopPropagation()}>
-                  <Group gap={4}>
-                    <Tooltip label="Edit user">
-                      <ActionIcon variant="subtle" onClick={() => startEdit(u)}>
-                        <IconPencil size={15} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label="Revoke all sessions">
-                      <ActionIcon variant="subtle" color="orange" onClick={() => revokeSessions(u)}>
-                        <IconShieldLock size={15} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label="Delete user">
-                      <ActionIcon variant="subtle" color="red" onClick={() => setDelTarget(u)}>
-                        <IconTrash size={15} />
-                      </ActionIcon>
-                    </Tooltip>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
+                  </small>
+                </CTableDataCell>
+                <CTableDataCell>
+                  <div className="d-flex gap-1">
+                    <CTooltip content="Edit user">
+                      <CButton color="primary" variant="ghost" size="sm" onClick={() => navigate(`/users/${u.id}`)}>
+                        <CIcon icon={cilPencil} />
+                      </CButton>
+                    </CTooltip>
+                    <CTooltip content="Revoke all sessions">
+                      <CButton color="warning" variant="ghost" size="sm" onClick={() => revokeSessions(u)}>
+                        <CIcon icon={cilShieldAlt} />
+                      </CButton>
+                    </CTooltip>
+                    <CTooltip content="Delete user">
+                      <CButton color="danger" variant="ghost" size="sm" onClick={() => setDelTarget(u)}>
+                        <CIcon icon={cilTrash} />
+                      </CButton>
+                    </CTooltip>
+                  </div>
+                </CTableDataCell>
+              </CTableRow>
             ))}
-          </Table.Tbody>
-        </Table>
+          </CTableBody>
+        </CTable>
       )}
 
-      {/* Create / Edit modal */}
-      <Modal
-        opened={opened}
-        onClose={close}
-        title={
-          <Group gap="xs">
-            <IconUsers size={18} />
-            <span>{current ? `Edit: ${current.username}` : 'New user'}</span>
-          </Group>
-        }
-        size="sm"
-      >
-        <form onSubmit={save}>
-          <Stack gap="sm">
-            {!current && (
-              <TextInput
-                label="Username" required
-                value={form.username}
-                onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                autoFocus
-              />
-            )}
-            <TextInput
-              label="Email"
-              value={form.email}
-              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="user@example.com"
-            />
-            <PasswordInput
-              label={current ? 'New password (leave blank to keep)' : 'Password'}
-              required={!current}
-              value={form.password}
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-              description={!current ? 'Min 12 characters' : undefined}
-            />
-            <Select
-              label="Role"
-              data={ROLE_OPTIONS}
-              value={form.role}
-              onChange={v => setForm(f => ({ ...f, role: v }))}
-            />
-            <Group justify="flex-end" mt="xs">
-              <Button variant="default" onClick={close}>Cancel</Button>
-              <Button
-                type="submit"
-                loading={saving}
-                leftSection={<IconDeviceFloppy size={15} />}
-              >
-                {current ? 'Save changes' : 'Create user'}
-              </Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
+      {/* Create modal */}
+      <CModal visible={opened} onClose={close} alignment="center">
+        <CModalHeader><CModalTitle>New user</CModalTitle></CModalHeader>
+        <CForm onSubmit={save}>
+          <CModalBody>
+            <div className="mb-3">
+              <CFormLabel>Username *</CFormLabel>
+              <CFormInput value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} required autoFocus />
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Email</CFormLabel>
+              <CFormInput type="email" placeholder="user@example.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Password *</CFormLabel>
+              <CFormInput type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required />
+              <div className="form-text">Minimum 12 characters</div>
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Role</CFormLabel>
+              <CFormSelect value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+                <option value="viewer">Viewer</option>
+                <option value="admin">Admin</option>
+              </CFormSelect>
+            </div>
+          </CModalBody>
+          <CModalFooter>
+            <CButton color="secondary" variant="outline" onClick={close}>Cancel</CButton>
+            <CButton type="submit" color="primary" disabled={saving}>{saving ? 'Saving…' : 'Create'}</CButton>
+          </CModalFooter>
+        </CForm>
+      </CModal>
 
-      {/* Delete confirmation */}
       <ConfirmModal
         opened={!!delTarget}
         onClose={() => setDelTarget(null)}
         onConfirm={doDelete}
         title="Delete user"
-        message={`Delete user "${delTarget?.username}"? All their sessions will be revoked and this cannot be undone.`}
+        message={`Delete user "${delTarget?.username}"? This cannot be undone.`}
       />
-    </Stack>
+    </>
   )
 }
 
 function RoleBadge({ role }) {
-  return (
-    <Badge
-      size="sm"
-      color={role === 'admin' ? 'violet' : 'blue'}
-      variant="light"
-    >
-      {role}
-    </Badge>
-  )
+  return <CBadge color={role === 'admin' ? 'danger' : 'secondary'}>{role}</CBadge>
 }

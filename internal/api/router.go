@@ -61,6 +61,8 @@ func NewRouter(opts Options) http.Handler {
 	// ── Profile (own user, any role) ─────────────────────────────────────────
 	mux.Handle("GET /api/v1/profile",
 		iss.RequireAuth(http.HandlerFunc(profileH.Get)))
+	mux.Handle("PUT /api/v1/profile",
+		iss.RequireAuth(http.HandlerFunc(profileH.Update)))
 	mux.Handle("PUT /api/v1/profile/password",
 		iss.RequireAuth(http.HandlerFunc(profileH.ChangePassword)))
 

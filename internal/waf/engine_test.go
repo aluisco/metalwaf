@@ -438,4 +438,3 @@ func TestBuiltinRules_ReturnsOnlyBuiltin(t *testing.T) {
 		}
 	}
 }
-

@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react'
 import { sites as api } from '../api.js'
 import {
-  Stack, Title, Group, Button, Table, Badge, Modal,
-  TextInput, Select, Checkbox, Text, Skeleton, Alert
-} from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
+  CButton, CAlert, CSpinner, CBadge,
+  CTable, CTableHead, CTableBody, CTableRow, CTableHeaderCell, CTableDataCell,
+  CModal, CModalHeader, CModalTitle, CModalBody, CModalFooter,
+  CForm, CFormLabel, CFormInput, CFormSelect, CFormCheck,
+} from '@coreui/react'
+import { useDisclosure } from '../lib/use-disclosure.js'
+import { notifications } from '../lib/notifications.js'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 
-const WAF_MODES = [
-  { value: 'off',    label: 'Off'    },
-  { value: 'detect', label: 'Detect' },
-  { value: 'block',  label: 'Block'  },
-]
+const WAF_MODES = ['off', 'detect', 'block']
 const EMPTY_SITE = { name: '', domain: '', waf_mode: 'detect', https_only: false, enabled: true }
 const EMPTY_UP   = { url: '', weight: 1, enabled: true }
 
@@ -64,7 +62,6 @@ export default function Sites() {
     api.listUpstreams(s.id).then(setUpList).catch(e => notifications.show({ message: e.message, color: 'red' }))
     openPanel()
   }
-
   function startAddUp()   { setCurrentUp(null); setUpForm(EMPTY_UP); openUp() }
   function startEditUp(u) { setCurrentUp(u); setUpForm({ url: u.url, weight: u.weight, enabled: u.enabled }); openUp() }
 
@@ -84,136 +81,135 @@ export default function Sites() {
     catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
   }
 
-  if (loading) return <Skeleton h={300} />
-  if (error)   return <Alert color="red">{error}</Alert>
+  if (loading) return <div className="text-center py-5"><CSpinner color="primary" /></div>
+  if (error)   return <CAlert color="danger">{error}</CAlert>
 
   return (
-    <Stack>
-      <Group justify="space-between">
-        <Title order={2}>Sites</Title>
-        <Button size="sm" onClick={startCreate}>+ New site</Button>
-      </Group>
+    <>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2 className="mb-0 fw-semibold">Sites</h2>
+        <CButton color="primary" onClick={startCreate}>+ New site</CButton>
+      </div>
 
       {list.length === 0 ? (
-        <Text c="dimmed">No sites configured yet.</Text>
+        <p className="text-body-secondary">No sites configured yet.</p>
       ) : (
-        <Table striped withTableBorder withColumnBorders>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Name</Table.Th><Table.Th>Domain</Table.Th>
-              <Table.Th>WAF Mode</Table.Th><Table.Th>HTTPS only</Table.Th>
-              <Table.Th>Status</Table.Th><Table.Th>Actions</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
+        <CTable bordered striped hover responsive>
+          <CTableHead><CTableRow>
+            <CTableHeaderCell>Name</CTableHeaderCell>
+            <CTableHeaderCell>Domain</CTableHeaderCell>
+            <CTableHeaderCell>WAF Mode</CTableHeaderCell>
+            <CTableHeaderCell>HTTPS only</CTableHeaderCell>
+            <CTableHeaderCell>Status</CTableHeaderCell>
+            <CTableHeaderCell>Actions</CTableHeaderCell>
+          </CTableRow></CTableHead>
+          <CTableBody>
             {list.map(s => (
-              <Table.Tr key={s.id}>
-                <Table.Td fw={600}>{s.name}</Table.Td>
-                <Table.Td><Text ff="monospace" size="sm">{s.domain}</Text></Table.Td>
-                <Table.Td><WafBadge mode={s.waf_mode} /></Table.Td>
-                <Table.Td>{s.https_only ? '✓' : '—'}</Table.Td>
-                <Table.Td>
-                  {s.enabled
-                    ? <Badge color="teal" variant="light">active</Badge>
-                    : <Badge color="gray" variant="light">disabled</Badge>}
-                </Table.Td>
-                <Table.Td>
-                  <Group gap="xs">
-                    <Button size="xs" variant="light" onClick={() => startEdit(s)}>Edit</Button>
-                    <Button size="xs" variant="light" color="blue" onClick={() => openUpstreams(s)}>Upstreams</Button>
-                    <Button size="xs" variant="light" color="red"  onClick={() => setDelSite(s)}>Delete</Button>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
+              <CTableRow key={s.id}>
+                <CTableDataCell><strong>{s.name}</strong></CTableDataCell>
+                <CTableDataCell><code>{s.domain}</code></CTableDataCell>
+                <CTableDataCell><WafBadge mode={s.waf_mode} /></CTableDataCell>
+                <CTableDataCell>{s.https_only ? '✓' : '—'}</CTableDataCell>
+                <CTableDataCell>
+                  <CBadge color={s.enabled ? 'success' : 'secondary'}>{s.enabled ? 'active' : 'disabled'}</CBadge>
+                </CTableDataCell>
+                <CTableDataCell>
+                  <div className="d-flex gap-1">
+                    <CButton size="sm" color="primary" variant="outline" onClick={() => startEdit(s)}>Edit</CButton>
+                    <CButton size="sm" color="info"    variant="outline" onClick={() => openUpstreams(s)}>Upstreams</CButton>
+                    <CButton size="sm" color="danger"  variant="outline" onClick={() => setDelSite(s)}>Delete</CButton>
+                  </div>
+                </CTableDataCell>
+              </CTableRow>
             ))}
-          </Table.Tbody>
-        </Table>
+          </CTableBody>
+        </CTable>
       )}
 
       {/* Site modal */}
-      <Modal opened={siteOpened} onClose={closeSite} title={current ? 'Edit site' : 'New site'}>
-        <form onSubmit={saveSite}>
-          <Stack>
-            <TextInput label="Name" value={siteForm.name} onChange={e => setSiteForm(f=>({...f,name:e.target.value}))} required />
-            <TextInput label="Domain" placeholder="example.com" value={siteForm.domain} onChange={e => setSiteForm(f=>({...f,domain:e.target.value}))} required />
-            <Select label="WAF Mode" data={WAF_MODES} value={siteForm.waf_mode} onChange={v => setSiteForm(f=>({...f,waf_mode:v}))} />
-            <Group>
-              <Checkbox label="HTTPS only" checked={siteForm.https_only} onChange={e => setSiteForm(f=>({...f,https_only:e.target.checked}))} />
-              <Checkbox label="Enabled"    checked={siteForm.enabled}    onChange={e => setSiteForm(f=>({...f,enabled:e.target.checked}))} />
-            </Group>
-            <Group justify="flex-end">
-              <Button variant="default" onClick={closeSite}>Cancel</Button>
-              <Button type="submit" loading={saving}>Save</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
+      <CModal visible={siteOpened} onClose={closeSite} alignment="center">
+        <CModalHeader><CModalTitle>{current ? 'Edit site' : 'New site'}</CModalTitle></CModalHeader>
+        <CForm onSubmit={saveSite}>
+          <CModalBody>
+            <div className="mb-3"><CFormLabel>Name *</CFormLabel><CFormInput value={siteForm.name} onChange={e => setSiteForm(f=>({...f,name:e.target.value}))} required /></div>
+            <div className="mb-3"><CFormLabel>Domain *</CFormLabel><CFormInput placeholder="example.com" value={siteForm.domain} onChange={e => setSiteForm(f=>({...f,domain:e.target.value}))} required /></div>
+            <div className="mb-3">
+              <CFormLabel>WAF Mode</CFormLabel>
+              <CFormSelect value={siteForm.waf_mode} onChange={e => setSiteForm(f=>({...f,waf_mode:e.target.value}))}>
+                {WAF_MODES.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase()+m.slice(1)}</option>)}
+              </CFormSelect>
+            </div>
+            <div className="d-flex gap-4">
+              <CFormCheck label="HTTPS only" checked={siteForm.https_only} onChange={e => setSiteForm(f=>({...f,https_only:e.target.checked}))} />
+              <CFormCheck label="Enabled"    checked={siteForm.enabled}    onChange={e => setSiteForm(f=>({...f,enabled:e.target.checked}))} />
+            </div>
+          </CModalBody>
+          <CModalFooter>
+            <CButton color="secondary" variant="outline" onClick={closeSite}>Cancel</CButton>
+            <CButton type="submit" color="primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</CButton>
+          </CModalFooter>
+        </CForm>
+      </CModal>
 
       {/* Upstreams panel */}
-      <Modal opened={panelOpened} onClose={closePanel} title={`Upstreams — ${panelSite?.name ?? ''}`} size="lg">
-        <Stack>
-          <Group justify="flex-end">
-            <Button size="sm" onClick={startAddUp}>+ Add upstream</Button>
-          </Group>
-          {upList.length === 0 ? <Text c="dimmed">No upstreams yet.</Text> : (
-            <Table withTableBorder>
-              <Table.Thead>
-                <Table.Tr><Table.Th>URL</Table.Th><Table.Th>Weight</Table.Th><Table.Th>Status</Table.Th><Table.Th /></Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
+      <CModal visible={panelOpened} onClose={closePanel} size="lg" alignment="center">
+        <CModalHeader><CModalTitle>Upstreams — {panelSite?.name ?? ''}</CModalTitle></CModalHeader>
+        <CModalBody>
+          <div className="d-flex justify-content-end mb-3">
+            <CButton color="primary" size="sm" onClick={startAddUp}>+ Add upstream</CButton>
+          </div>
+          {upList.length === 0 ? <p className="text-body-secondary">No upstreams yet.</p> : (
+            <CTable bordered hover>
+              <CTableHead><CTableRow>
+                <CTableHeaderCell>URL</CTableHeaderCell>
+                <CTableHeaderCell>Weight</CTableHeaderCell>
+                <CTableHeaderCell>Status</CTableHeaderCell>
+                <CTableHeaderCell></CTableHeaderCell>
+              </CTableRow></CTableHead>
+              <CTableBody>
                 {upList.map(u => (
-                  <Table.Tr key={u.id}>
-                    <Table.Td><Text ff="monospace" size="sm">{u.url}</Text></Table.Td>
-                    <Table.Td>{u.weight}</Table.Td>
-                    <Table.Td>{u.enabled ? <Badge color="teal" variant="light">on</Badge> : <Badge color="gray" variant="light">off</Badge>}</Table.Td>
-                    <Table.Td>
-                      <Group gap="xs">
-                        <Button size="xs" variant="light" onClick={() => startEditUp(u)}>Edit</Button>
-                        <Button size="xs" variant="light" color="red" onClick={() => setDelUp(u)}>✕</Button>
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
+                  <CTableRow key={u.id}>
+                    <CTableDataCell><code>{u.url}</code></CTableDataCell>
+                    <CTableDataCell>{u.weight}</CTableDataCell>
+                    <CTableDataCell><CBadge color={u.enabled ? 'success' : 'secondary'}>{u.enabled ? 'on' : 'off'}</CBadge></CTableDataCell>
+                    <CTableDataCell>
+                      <div className="d-flex gap-1">
+                        <CButton size="sm" color="primary" variant="outline" onClick={() => startEditUp(u)}>Edit</CButton>
+                        <CButton size="sm" color="danger"  variant="outline" onClick={() => setDelUp(u)}>✕</CButton>
+                      </div>
+                    </CTableDataCell>
+                  </CTableRow>
                 ))}
-              </Table.Tbody>
-            </Table>
+              </CTableBody>
+            </CTable>
           )}
-        </Stack>
-      </Modal>
+        </CModalBody>
+        <CModalFooter><CButton color="secondary" onClick={closePanel}>Close</CButton></CModalFooter>
+      </CModal>
 
-      {/* Upstream edit modal */}
-      <Modal opened={upOpened} onClose={closeUp} title={currentUp ? 'Edit upstream' : 'Add upstream'}>
-        <form onSubmit={saveUpstream}>
-          <Stack>
-            <TextInput label="URL" placeholder="http://10.0.0.1:8080" value={upForm.url} onChange={e => setUpForm(f=>({...f,url:e.target.value}))} required />
-            <TextInput label="Weight" type="number" min={1} max={100} value={upForm.weight} onChange={e => setUpForm(f=>({...f,weight:+e.target.value}))} />
-            <Checkbox label="Enabled" checked={upForm.enabled} onChange={e => setUpForm(f=>({...f,enabled:e.target.checked}))} />
-            <Group justify="flex-end">
-              <Button variant="default" onClick={closeUp}>Cancel</Button>
-              <Button type="submit" loading={saving}>Save</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
+      {/* Upstream edit */}
+      <CModal visible={upOpened} onClose={closeUp} alignment="center">
+        <CModalHeader><CModalTitle>{currentUp ? 'Edit upstream' : 'Add upstream'}</CModalTitle></CModalHeader>
+        <CForm onSubmit={saveUpstream}>
+          <CModalBody>
+            <div className="mb-3"><CFormLabel>URL *</CFormLabel><CFormInput placeholder="http://10.0.0.1:8080" value={upForm.url} onChange={e => setUpForm(f=>({...f,url:e.target.value}))} required /></div>
+            <div className="mb-3"><CFormLabel>Weight</CFormLabel><CFormInput type="number" min={1} max={100} value={upForm.weight} onChange={e => setUpForm(f=>({...f,weight:+e.target.value}))} /></div>
+            <CFormCheck label="Enabled" checked={upForm.enabled} onChange={e => setUpForm(f=>({...f,enabled:e.target.checked}))} />
+          </CModalBody>
+          <CModalFooter>
+            <CButton color="secondary" variant="outline" onClick={closeUp}>Cancel</CButton>
+            <CButton type="submit" color="primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</CButton>
+          </CModalFooter>
+        </CForm>
+      </CModal>
 
-      <ConfirmModal
-        opened={!!delSite}
-        onClose={() => setDelSite(null)}
-        onConfirm={() => deleteSite(delSite)}
-        title="Delete site"
-        message={`Delete site "${delSite?.name}"? All upstreams and rules will be removed.`}
-      />
-      <ConfirmModal
-        opened={!!delUp}
-        onClose={() => setDelUp(null)}
-        onConfirm={() => deleteUpstream(delUp)}
-        title="Delete upstream"
-        message={`Delete upstream "${delUp?.url}"?`}
-      />
-    </Stack>
+      <ConfirmModal opened={!!delSite} onClose={() => setDelSite(null)} onConfirm={() => deleteSite(delSite)} title="Delete site" message={`Delete site "${delSite?.name}"? This cannot be undone.`} />
+      <ConfirmModal opened={!!delUp}   onClose={() => setDelUp(null)}   onConfirm={() => deleteUpstream(delUp)} title="Delete upstream" message={`Delete upstream "${delUp?.url}"?`} />
+    </>
   )
 }
 
 function WafBadge({ mode }) {
-  const map = { block: 'red', detect: 'yellow', off: 'gray' }
-  return <Badge color={map[mode] ?? 'gray'} variant="light">{mode}</Badge>
+  const map = { block: 'danger', detect: 'warning', off: 'secondary' }
+  return <CBadge color={map[mode] ?? 'secondary'}>{mode}</CBadge>
 }

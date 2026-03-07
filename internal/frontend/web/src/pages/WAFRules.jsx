@@ -1,28 +1,19 @@
 import { useEffect, useState, useCallback } from 'react'
 import { sites as sitesApi, rules as api } from '../api.js'
 import {
-  Stack, Title, Group, Button, Table, Badge, Modal,
-  TextInput, Select, Checkbox, Text, SimpleGrid, Skeleton, Alert, NumberInput,
-  Switch, ThemeIcon, Tooltip, Tabs, Textarea, ScrollArea,
-} from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
-import {
-  IconShieldBolt, IconPlus, IconPencil, IconTrash,
-  IconDownload, IconUpload, IconShield,
-} from '@tabler/icons-react'
+  CButton, CAlert, CSpinner, CBadge,
+  CTable, CTableHead, CTableBody, CTableRow, CTableHeaderCell, CTableDataCell,
+  CModal, CModalHeader, CModalTitle, CModalBody, CModalFooter,
+  CForm, CFormLabel, CFormInput, CFormSelect, CFormCheck, CFormTextarea,
+  CRow, CCol, CNav, CNavItem, CNavLink, CTabContent, CTabPane,
+  CFormSwitch,
+} from '@coreui/react'
+import { useDisclosure } from '../lib/use-disclosure.js'
+import { notifications } from '../lib/notifications.js'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 
 const FIELDS    = ['uri','query','body','ip','user_agent','method','header']
 const OPERATORS = ['contains','not_contains','regex','equals','startswith','endswith','cidr']
-const ACTIONS   = [
-  { value: 'block',  label: 'Block'  },
-  { value: 'detect', label: 'Detect' },
-  { value: 'allow',  label: 'Allow'  },
-]
-const FIELD_OPT    = FIELDS.map(f => ({ value: f, label: f }))
-const OPERATOR_OPT = OPERATORS.map(o => ({ value: o, label: o }))
-
 const EMPTY = { name:'', description:'', field:'uri', operator:'contains', value:'', action:'block', score:50, enabled:true, site_id:null }
 
 export default function WAFRules() {
@@ -37,14 +28,14 @@ export default function WAFRules() {
   const [saving, setSaving]         = useState(false)
   const [current, setCurrent]       = useState(null)
   const [form, setForm]             = useState(EMPTY)
-  const [opened, { open, close }]                           = useDisclosure()
+  const [opened, { open, close }]                              = useDisclosure()
   const [importOpen, { open: openImport, close: closeImport }] = useDisclosure()
   const [importText, setImportText] = useState('')
   const [importing, setImporting]   = useState(false)
   const [delTarget, setDelTarget]   = useState(null)
+  const [tab, setTab]               = useState('custom')
 
   useEffect(() => { sitesApi.list().then(setSiteList).catch(() => {}) }, [])
-
   useEffect(() => {
     api.builtin().then(setBuiltin).catch(() => {})
     api.categories().then(setCategories).catch(() => {})
@@ -106,7 +97,7 @@ export default function WAFRules() {
       closeImport(); setImportText(''); load()
       notifications.show({
         message: `Imported ${result.imported} rule(s)` + (result.failed ? `, ${result.failed} failed` : ''),
-        color: result.failed > 0 ? 'yellow' : 'teal',
+        color: result.failed > 0 ? 'orange' : 'teal',
       })
     } catch (err) { notifications.show({ title: 'Import failed', message: err.message, color: 'red' }) }
     finally { setImporting(false) }
@@ -116,228 +107,204 @@ export default function WAFRules() {
     { value: '__global__', label: 'Global (no site)' },
     ...siteList.map(s => ({ value: String(s.id), label: s.name })),
   ]
-
   const visibleBuiltin = catFilter ? builtin.filter(r => r.category === catFilter) : builtin
 
-  if (loading && list.length === 0 && builtin.length === 0) return <Skeleton h={300} />
+  if (loading && list.length === 0 && builtin.length === 0) return <div className="text-center py-5"><CSpinner color="primary" /></div>
 
   return (
-    <Stack>
-      <Group gap="xs">
-        <ThemeIcon size={32} variant="light" color="orange" radius="md">
-          <IconShieldBolt size={18} />
-        </ThemeIcon>
-        <Title order={2}>WAF Rules</Title>
-      </Group>
+    <>
+      <h2 className="mb-4 fw-semibold">🛡 WAF Rules</h2>
+      {error && <CAlert color="danger">{error}</CAlert>}
 
-      {error && <Alert color="red">{error}</Alert>}
+      <CNav variant="tabs" className="mb-3">
+        <CNavItem><CNavLink active={tab==='custom'}  onClick={() => setTab('custom')}  style={{cursor:'pointer'}}>Custom Rules <CBadge color="secondary" className="ms-1">{list.length}</CBadge></CNavLink></CNavItem>
+        <CNavItem><CNavLink active={tab==='builtin'} onClick={() => setTab('builtin')} style={{cursor:'pointer'}}>Built-in Rules <CBadge color="warning" className="ms-1">{builtin.length}</CBadge></CNavLink></CNavItem>
+      </CNav>
 
-      <Tabs defaultValue="custom">
-        <Tabs.List>
-          <Tabs.Tab value="custom" leftSection={<IconPencil size={14} />}>
-            Custom Rules <Badge size="xs" ml={4} color="gray">{list.length}</Badge>
-          </Tabs.Tab>
-          <Tabs.Tab value="builtin" leftSection={<IconShield size={14} />}>
-            Built-in Rules <Badge size="xs" ml={4} color="orange">{builtin.length}</Badge>
-          </Tabs.Tab>
-        </Tabs.List>
-
-        {/* ─── Custom Rules ────────────────────────────────────────── */}
-        <Tabs.Panel value="custom" pt="md">
-          <Group justify="space-between" mb="sm">
-            <Select
-              size="sm" data={siteOptions} w={200}
+      <CTabContent>
+        {/* Custom Rules */}
+        <CTabPane visible={tab === 'custom'}>
+          <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <CFormSelect style={{width:200}} size="sm"
               value={siteId == null ? '__global__' : String(siteId)}
-              onChange={v => setSiteId(v === '__global__' ? null : +v)}
-            />
-            <Group gap="xs">
-              <Tooltip label="Export all custom rules as JSON">
-                <Button size="sm" variant="default" leftSection={<IconDownload size={14} />} onClick={doExport}>Export</Button>
-              </Tooltip>
-              <Button size="sm" variant="default" leftSection={<IconUpload size={14} />} onClick={openImport}>Import</Button>
-              <Button size="sm" leftSection={<IconPlus size={15} />} onClick={startCreate}>New rule</Button>
-            </Group>
-          </Group>
-
+              onChange={e => setSiteId(e.target.value === '__global__' ? null : +e.target.value)}>
+              {siteOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </CFormSelect>
+            <div className="d-flex gap-2">
+              <CButton size="sm" color="secondary" variant="outline" onClick={doExport}>⬇ Export</CButton>
+              <CButton size="sm" color="secondary" variant="outline" onClick={openImport}>⬆ Import</CButton>
+              <CButton size="sm" color="primary" onClick={startCreate}>+ New rule</CButton>
+            </div>
+          </div>
           {list.length === 0 ? (
-            <Text c="dimmed">No custom rules found. Click "New rule" to create one.</Text>
+            <p className="text-body-secondary">No custom rules. Click "New rule" to create one.</p>
           ) : (
-            <ScrollArea>
-              <Table striped withTableBorder withColumnBorders>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Name</Table.Th>
-                    <Table.Th>Field</Table.Th>
-                    <Table.Th>Operator</Table.Th>
-                    <Table.Th>Value</Table.Th>
-                    <Table.Th>Action</Table.Th>
-                    <Table.Th>Score</Table.Th>
-                    <Table.Th>State</Table.Th>
-                    <Table.Th>Actions</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
+            <div className="table-responsive">
+              <CTable bordered striped hover>
+                <CTableHead><CTableRow>
+                  <CTableHeaderCell>Name</CTableHeaderCell>
+                  <CTableHeaderCell>Field</CTableHeaderCell>
+                  <CTableHeaderCell>Operator</CTableHeaderCell>
+                  <CTableHeaderCell>Value</CTableHeaderCell>
+                  <CTableHeaderCell>Action</CTableHeaderCell>
+                  <CTableHeaderCell>Score</CTableHeaderCell>
+                  <CTableHeaderCell>State</CTableHeaderCell>
+                  <CTableHeaderCell>Actions</CTableHeaderCell>
+                </CTableRow></CTableHead>
+                <CTableBody>
                   {list.map(r => (
-                    <Table.Tr key={r.id}>
-                      <Table.Td>
-                        <Text fw={600} size="sm">{r.name}</Text>
-                        {r.description && <Text size="xs" c="dimmed">{r.description}</Text>}
-                      </Table.Td>
-                      <Table.Td><Text ff="monospace" size="sm">{r.field}</Text></Table.Td>
-                      <Table.Td><Badge color="blue" variant="light" size="sm">{r.operator}</Badge></Table.Td>
-                      <Table.Td maw={180} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <Text ff="monospace" size="xs">{r.value}</Text>
-                      </Table.Td>
-                      <Table.Td><ActionBadge action={r.action} /></Table.Td>
-                      <Table.Td>{r.score}</Table.Td>
-                      <Table.Td>
-                        <Switch checked={r.enabled} onChange={() => toggleEnabled(r)} size="sm" color="teal" />
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <Tooltip label="Edit rule">
-                            <Button size="xs" variant="subtle" px={6} onClick={() => startEdit(r)}>
-                              <IconPencil size={14} />
-                            </Button>
-                          </Tooltip>
-                          <Tooltip label="Delete rule">
-                            <Button size="xs" variant="subtle" color="red" px={6} onClick={() => setDelTarget(r)}>
-                              <IconTrash size={14} />
-                            </Button>
-                          </Tooltip>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
+                    <CTableRow key={r.id}>
+                      <CTableDataCell>
+                        <strong className="small">{r.name}</strong>
+                        {r.description && <div className="text-body-secondary" style={{fontSize:11}}>{r.description}</div>}
+                      </CTableDataCell>
+                      <CTableDataCell><code>{r.field}</code></CTableDataCell>
+                      <CTableDataCell><CBadge color="info">{r.operator}</CBadge></CTableDataCell>
+                      <CTableDataCell style={{maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        <code style={{fontSize:11}}>{r.value}</code>
+                      </CTableDataCell>
+                      <CTableDataCell><ActionBadge action={r.action} /></CTableDataCell>
+                      <CTableDataCell>{r.score}</CTableDataCell>
+                      <CTableDataCell>
+                        <CFormSwitch checked={r.enabled} onChange={() => toggleEnabled(r)} color="success" />
+                      </CTableDataCell>
+                      <CTableDataCell>
+                        <div className="d-flex gap-1">
+                          <CButton size="sm" color="primary" variant="ghost" onClick={() => startEdit(r)}>✏</CButton>
+                          <CButton size="sm" color="danger"  variant="ghost" onClick={() => setDelTarget(r)}>🗑</CButton>
+                        </div>
+                      </CTableDataCell>
+                    </CTableRow>
                   ))}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea>
+                </CTableBody>
+              </CTable>
+            </div>
           )}
-        </Tabs.Panel>
+        </CTabPane>
 
-        {/* ─── Built-in Rules ──────────────────────────────────────── */}
-        <Tabs.Panel value="builtin" pt="md">
+        {/* Built-in Rules */}
+        <CTabPane visible={tab === 'builtin'}>
           {categories.length > 0 && (
-            <Group gap="xs" mb="sm">
-              <Badge
-                variant={!catFilter ? 'filled' : 'light'} color="gray"
-                style={{ cursor: 'pointer' }} onClick={() => setCatFilter(null)}
-              >All</Badge>
+            <div className="d-flex flex-wrap gap-2 mb-3">
+              <CBadge role="button" color={!catFilter ? 'secondary' : 'light'} textColor={!catFilter ? undefined : 'dark'}
+                onClick={() => setCatFilter(null)} style={{cursor:'pointer'}}>All</CBadge>
               {categories.map(c => (
-                <Badge
-                  key={c.category}
-                  variant={catFilter === c.category ? 'filled' : 'light'}
-                  color="orange"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => setCatFilter(catFilter === c.category ? null : c.category)}
-                >
+                <CBadge key={c.category} role="button"
+                  color={catFilter === c.category ? 'warning' : 'light'} textColor={catFilter === c.category ? undefined : 'dark'}
+                  onClick={() => setCatFilter(catFilter === c.category ? null : c.category)} style={{cursor:'pointer'}}>
                   {c.category} ({c.builtin})
-                </Badge>
+                </CBadge>
               ))}
-            </Group>
+            </div>
           )}
-          <ScrollArea>
-            <Table striped withTableBorder withColumnBorders>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Name</Table.Th>
-                  <Table.Th>Category</Table.Th>
-                  <Table.Th>Field</Table.Th>
-                  <Table.Th>Value</Table.Th>
-                  <Table.Th>Action</Table.Th>
-                  <Table.Th>Score</Table.Th>
-                  <Table.Th>Level</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
+          <div className="table-responsive">
+            <CTable bordered striped hover>
+              <CTableHead><CTableRow>
+                <CTableHeaderCell>Name</CTableHeaderCell>
+                <CTableHeaderCell>Category</CTableHeaderCell>
+                <CTableHeaderCell>Field</CTableHeaderCell>
+                <CTableHeaderCell>Value</CTableHeaderCell>
+                <CTableHeaderCell>Action</CTableHeaderCell>
+                <CTableHeaderCell>Score</CTableHeaderCell>
+                <CTableHeaderCell>Level</CTableHeaderCell>
+              </CTableRow></CTableHead>
+              <CTableBody>
                 {visibleBuiltin.map(r => (
-                  <Table.Tr key={r.name + '_' + r.field}>
-                    <Table.Td><Text size="sm" fw={500}>{r.name}</Text></Table.Td>
-                    <Table.Td><Badge size="xs" color="orange" variant="outline">{r.category}</Badge></Table.Td>
-                    <Table.Td><Text ff="monospace" size="xs">{r.field}</Text></Table.Td>
-                    <Table.Td maw={220} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <Text ff="monospace" size="xs">{r.value}</Text>
-                    </Table.Td>
-                    <Table.Td><ActionBadge action={r.action} /></Table.Td>
-                    <Table.Td>{r.score}</Table.Td>
-                    <Table.Td>
-                      <Badge size="xs" color={r.level <= 1 ? 'red' : r.level === 2 ? 'orange' : 'gray'} variant="light">
-                        L{r.level}
-                      </Badge>
-                    </Table.Td>
-                  </Table.Tr>
+                  <CTableRow key={r.name + '_' + r.field}>
+                    <CTableDataCell><span className="small fw-medium">{r.name}</span></CTableDataCell>
+                    <CTableDataCell><CBadge color="warning" textColor="dark">{r.category}</CBadge></CTableDataCell>
+                    <CTableDataCell><code style={{fontSize:11}}>{r.field}</code></CTableDataCell>
+                    <CTableDataCell style={{maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      <code style={{fontSize:11}}>{r.value}</code>
+                    </CTableDataCell>
+                    <CTableDataCell><ActionBadge action={r.action} /></CTableDataCell>
+                    <CTableDataCell>{r.score}</CTableDataCell>
+                    <CTableDataCell>
+                      <CBadge color={r.level <= 1 ? 'danger' : r.level === 2 ? 'warning' : 'secondary'}>L{r.level}</CBadge>
+                    </CTableDataCell>
+                  </CTableRow>
                 ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
-        </Tabs.Panel>
-      </Tabs>
+              </CTableBody>
+            </CTable>
+          </div>
+        </CTabPane>
+      </CTabContent>
 
-      {/* ─── Create / Edit Modal ─────────────────────────────────── */}
-      <Modal opened={opened} onClose={close} title={current ? 'Edit WAF rule' : 'New WAF rule'} size="lg">
-        <form onSubmit={save}>
-          <Stack>
-            <SimpleGrid cols={2}>
-              <TextInput label="Name" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} required />
-              <NumberInput label="Score (0–1000)" min={0} max={1000} value={form.score} onChange={v => setForm(f => ({...f, score: +v}))} />
-            </SimpleGrid>
-            <TextInput label="Description (optional)" value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} />
-            <SimpleGrid cols={2}>
-              <Select label="Field"    data={FIELD_OPT}    value={form.field}    onChange={v => setForm(f => ({...f, field: v}))} />
-              <Select label="Operator" data={OPERATOR_OPT} value={form.operator} onChange={v => setForm(f => ({...f, operator: v}))} />
-            </SimpleGrid>
-            <TextInput
-              label="Value"
-              value={form.value}
-              onChange={e => setForm(f => ({...f, value: e.target.value}))}
-              required
-              placeholder="Regex pattern, string, or CIDR (e.g. 192.168.0.0/16)"
-            />
-            <SimpleGrid cols={2}>
-              <Select label="Action" data={ACTIONS} value={form.action} onChange={v => setForm(f => ({...f, action: v}))} />
-              <Checkbox label="Enabled" mt="xl" checked={form.enabled} onChange={e => setForm(f => ({...f, enabled: e.target.checked}))} />
-            </SimpleGrid>
-            <Group justify="flex-end">
-              <Button variant="default" onClick={close}>Cancel</Button>
-              <Button type="submit" loading={saving}>Save</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
+      {/* Create / Edit modal */}
+      <CModal visible={opened} onClose={close} size="lg" alignment="center">
+        <CModalHeader><CModalTitle>{current ? 'Edit WAF rule' : 'New WAF rule'}</CModalTitle></CModalHeader>
+        <CForm onSubmit={save}>
+          <CModalBody>
+            <CRow className="g-3">
+              <CCol md={8}>
+                <CFormLabel>Name *</CFormLabel>
+                <CFormInput value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} required />
+              </CCol>
+              <CCol md={4}>
+                <CFormLabel>Score (0–1000)</CFormLabel>
+                <CFormInput type="number" min={0} max={1000} value={form.score} onChange={e => setForm(f => ({...f, score: +e.target.value}))} />
+              </CCol>
+              <CCol xs={12}>
+                <CFormLabel>Description</CFormLabel>
+                <CFormInput value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} />
+              </CCol>
+              <CCol md={6}>
+                <CFormLabel>Field</CFormLabel>
+                <CFormSelect value={form.field} onChange={e => setForm(f => ({...f, field: e.target.value}))}>
+                  {FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
+                </CFormSelect>
+              </CCol>
+              <CCol md={6}>
+                <CFormLabel>Operator</CFormLabel>
+                <CFormSelect value={form.operator} onChange={e => setForm(f => ({...f, operator: e.target.value}))}>
+                  {OPERATORS.map(o => <option key={o} value={o}>{o}</option>)}
+                </CFormSelect>
+              </CCol>
+              <CCol xs={12}>
+                <CFormLabel>Value *</CFormLabel>
+                <CFormInput value={form.value} onChange={e => setForm(f => ({...f, value: e.target.value}))} required
+                  placeholder="Regex, string, or CIDR (e.g. 192.168.0.0/16)" />
+              </CCol>
+              <CCol md={6}>
+                <CFormLabel>Action</CFormLabel>
+                <CFormSelect value={form.action} onChange={e => setForm(f => ({...f, action: e.target.value}))}>
+                  <option value="block">Block</option>
+                  <option value="detect">Detect</option>
+                  <option value="allow">Allow</option>
+                </CFormSelect>
+              </CCol>
+              <CCol md={6} className="d-flex align-items-end pb-1">
+                <CFormCheck label="Enabled" checked={form.enabled} onChange={e => setForm(f => ({...f, enabled: e.target.checked}))} />
+              </CCol>
+            </CRow>
+          </CModalBody>
+          <CModalFooter>
+            <CButton color="secondary" variant="outline" onClick={close}>Cancel</CButton>
+            <CButton type="submit" color="primary" disabled={saving}>{saving ? 'Saving…' : 'Save rule'}</CButton>
+          </CModalFooter>
+        </CForm>
+      </CModal>
 
-      {/* ─── Import Modal ────────────────────────────────────────── */}
-      <Modal opened={importOpen} onClose={closeImport} title="Import WAF rules" size="lg">
-        <Stack>
-          <Text size="sm" c="dimmed">
-            Paste exported JSON below. Accepts the full export envelope{' '}
-            <code>{'{"rules":[...]}'}</code> or just the raw array.
-          </Text>
-          <Textarea
-            autosize minRows={10} maxRows={20} ff="monospace" fz="xs"
-            value={importText}
-            onChange={e => setImportText(e.target.value)}
-            placeholder={'{"rules":[{"name":"My block","field":"uri","operator":"contains","value":"/payload","action":"block","score":50}]}'}
-          />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={closeImport}>Cancel</Button>
-            <Button loading={importing} disabled={!importText.trim()} onClick={doImport}>Import</Button>
-          </Group>
-        </Stack>
-      </Modal>
+      {/* Import modal */}
+      <CModal visible={importOpen} onClose={closeImport} alignment="center">
+        <CModalHeader><CModalTitle>Import rules (JSON)</CModalTitle></CModalHeader>
+        <CModalBody>
+          <CFormTextarea rows={10} style={{fontFamily:'monospace',fontSize:12}} placeholder='[{"name":"..."}]'
+            value={importText} onChange={e => setImportText(e.target.value)} />
+        </CModalBody>
+        <CModalFooter>
+          <CButton color="secondary" variant="outline" onClick={closeImport}>Cancel</CButton>
+          <CButton color="primary" disabled={importing} onClick={doImport}>{importing ? 'Importing…' : 'Import'}</CButton>
+        </CModalFooter>
+      </CModal>
 
-      <ConfirmModal
-        opened={!!delTarget}
-        onClose={() => setDelTarget(null)}
-        onConfirm={() => remove(delTarget)}
-        title="Delete rule"
-        message={`Delete rule "${delTarget?.name}"? This cannot be undone.`}
-      />
-    </Stack>
+      <ConfirmModal opened={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={() => remove(delTarget)}
+        title="Delete WAF rule" message={`Delete rule "${delTarget?.name}"?`} />
+    </>
   )
 }
 
 function ActionBadge({ action }) {
-  const map = { block: 'red', detect: 'yellow', allow: 'teal' }
-  return <Badge color={map[action] ?? 'gray'} variant="light">{action}</Badge>
+  const map = { block: 'danger', detect: 'warning', allow: 'success' }
+  return <CBadge color={map[action] ?? 'secondary'}>{action}</CBadge>
 }
-

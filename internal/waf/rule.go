@@ -56,19 +56,19 @@ const (
 // Rule is the unified representation used by the engine for both built-in
 // signatures and custom rules loaded from the database.
 type Rule struct {
-	ID       string // empty for built-in rules
-	SiteID   string // empty = applies to all sites
-	Name     string
-	Category string
-	Field    string
-	Operator string
-	Value    string
-	Score    int
-	Action   string
-	Builtin  bool
+	ID       string `json:"id"`      // empty for built-in rules
+	SiteID   string `json:"site_id"` // empty = applies to all sites
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+	Score    int    `json:"score"`
+	Action   string `json:"action"`
+	Builtin  bool   `json:"builtin"`
 	// Level is the minimum paranoia level required to activate this rule.
 	// 0 = always active (used for custom rules); 1–4 = paranoia threshold.
-	Level int
+	Level int `json:"level"`
 }
 
 // FromDB converts a database.WAFRule to a Rule.

@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Center, Paper, Title, TextInput, PasswordInput,
-  Button, Stack, Text, Alert, Group, ThemeIcon
-} from '@mantine/core'
-import { IconShieldCheck } from '@tabler/icons-react'
+  CContainer, CCard, CCardBody, CForm, CFormInput,
+  CFormLabel, CButton, CAlert, CInputGroup, CInputGroupText,
+} from '@coreui/react'
+import CIcon from '@coreui/icons-react'
+import { cilLockLocked, cilUser, cilShieldAlt } from '@coreui/icons'
 import { auth, setTokens } from '../api.js'
 
 export default function Login() {
@@ -36,65 +37,86 @@ export default function Login() {
   }
 
   return (
-    <Center mih="100vh">
-      <Paper shadow="xl" p="xl" w={400} radius="lg" withBorder>
-        <Stack>
-          <Stack gap={6} align="center" mb={4}>
-            <ThemeIcon
-              size={72} variant="gradient"
-              gradient={{ from: 'teal.8', to: 'cyan.4', deg: 135 }}
-              radius="xl" mb={8}
-            >
-              <IconShieldCheck size={40} stroke={1.5} />
-            </ThemeIcon>
-            <Title order={2} fw={900} style={{ letterSpacing: '-0.5px' }}>MetalWAF</Title>
-            <Text c="dimmed" size="sm">
-              {step === 'totp' ? 'Enter your 2FA code' : 'Sign in to your account'}
-            </Text>
-          </Stack>
+    <div className="login-page">
+      <CContainer>
+        <div className="row justify-content-center">
+          <div className="col-md-5 col-lg-4">
+            <CCard className="shadow-lg border-0 p-4">
+              <CCardBody>
+                <div className="text-center mb-4">
+                  <div className="fs-1 mb-2">🛡</div>
+                  <h2 className="fw-bold">MetalWAF</h2>
+                  <p className="text-body-secondary">
+                    {step === 'totp' ? 'Enter your 2FA code' : 'Sign in to your account'}
+                  </p>
+                </div>
 
-          {error && <Alert color="red" variant="light">{error}</Alert>}
+                {error && <CAlert color="danger">{error}</CAlert>}
 
-          <form onSubmit={handleSubmit}>
-            <Stack gap="sm">
-              {step === 'credentials' ? (
-                <>
-                  <TextInput
-                    label="Username" placeholder="admin"
-                    value={username} onChange={e => setUsername(e.target.value)}
-                    required autoFocus
-                  />
-                  <PasswordInput
-                    label="Password" placeholder="••••••••"
-                    value={password} onChange={e => setPassword(e.target.value)}
-                    required
-                  />
-                </>
-              ) : (
-                <TextInput
-                  label="TOTP Code" placeholder="123456"
-                  value={totp} onChange={e => setTotp(e.target.value)}
-                  maxLength={6} required autoFocus
-                />
-              )}
+                <CForm onSubmit={handleSubmit}>
+                  {step === 'credentials' ? (
+                    <>
+                      <div className="mb-3">
+                        <CFormLabel>Username</CFormLabel>
+                        <CInputGroup>
+                          <CInputGroupText>
+                            <CIcon icon={cilUser} />
+                          </CInputGroupText>
+                          <CFormInput
+                            placeholder="admin"
+                            value={username}
+                            onChange={e => setUsername(e.target.value)}
+                            required autoFocus
+                          />
+                        </CInputGroup>
+                      </div>
+                      <div className="mb-4">
+                        <CFormLabel>Password</CFormLabel>
+                        <CInputGroup>
+                          <CInputGroupText>
+                            <CIcon icon={cilLockLocked} />
+                          </CInputGroupText>
+                          <CFormInput
+                            type="password" placeholder="••••••••"
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            required
+                          />
+                        </CInputGroup>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mb-4">
+                      <CFormLabel>TOTP Code</CFormLabel>
+                      <CFormInput
+                        placeholder="123456"
+                        value={totp}
+                        onChange={e => setTotp(e.target.value)}
+                        maxLength={6} required autoFocus
+                      />
+                    </div>
+                  )}
 
-              <Group mt="xs" justify={step === 'totp' ? 'space-between' : 'flex-end'}>
-                {step === 'totp' && (
-                  <Button variant="subtle" size="sm" onClick={() => { setStep('credentials'); setError('') }}>
-                    ← Back
-                  </Button>
-                )}
-                <Button type="submit" loading={loading} fullWidth={step === 'credentials'}>
-                  {step === 'totp' ? 'Verify' : 'Sign in'}
-                </Button>
-              </Group>
-            </Stack>
-          </form>
-          <Text size="xs" c="dimmed" ta="center" mt="xs">
-            MetalWAF Admin · {new Date().getFullYear()}
-          </Text>
-        </Stack>
-      </Paper>
-    </Center>
+                  <div className={`d-flex ${step === 'totp' ? 'justify-content-between' : 'justify-content-end'}`}>
+                    {step === 'totp' && (
+                      <CButton color="secondary" variant="ghost" size="sm"
+                        onClick={() => { setStep('credentials'); setError('') }}>
+                        ← Back
+                      </CButton>
+                    )}
+                    <CButton type="submit" color="primary" className={step === 'credentials' ? 'w-100' : ''} disabled={loading}>
+                      {loading ? 'Please wait…' : step === 'totp' ? 'Verify' : 'Sign in'}
+                    </CButton>
+                  </div>
+                </CForm>
+              </CCardBody>
+            </CCard>
+            <p className="text-center text-body-secondary small mt-3">
+              MetalWAF Admin · {new Date().getFullYear()}
+            </p>
+          </div>
+        </div>
+      </CContainer>
+    </div>
   )
 }

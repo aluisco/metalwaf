@@ -103,11 +103,17 @@ func (m *Manager) Load(ctx context.Context) error {
 				"id", c.ID, "domain", c.Domain, "error", err)
 			continue
 		}
+		// Register under all SANs/CN from the cert itself.
 		for _, domain := range info.Domains {
 			newCerts[strings.ToLower(domain)] = tlsCert
 		}
+		// Also register under the stored domain override (set by the user
+		// when uploading — may differ from the cert's own CN/SANs).
+		if stored := strings.ToLower(c.Domain); stored != "" {
+			newCerts[stored] = tlsCert
+		}
 		slog.Debug("certificates: loaded cert",
-			"id", c.ID, "domains", info.Domains,
+			"id", c.ID, "domain", c.Domain, "cert_domains", info.Domains,
 			"expires", info.ExpiresAt.Format("2006-01-02"))
 	}
 
@@ -156,10 +162,28 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 		return acmeCert, nil
 	}
 
-	// 4. No real cert found. Return a per-SNI self-signed cert with the
-	// correct DNS SAN so browsers can show the "proceed anyway" warning
-	// instead of a hard-reject (ERR_CERT_COMMON_NAME_INVALID).
+	// 4. If the user has uploaded any certificate, prefer it over a
+	// MetalWAF-generated self-signed cert. This handles the common case where
+	// the cert's own CN/SANs don't exactly match the site domain but the user
+	// explicitly chose to use that cert.
+	if c := m.firstUploadedCert(); c != nil {
+		return c, nil
+	}
+
+	// 5. No uploaded cert at all. Return a per-SNI self-signed cert so the
+	// browser can show "proceed anyway" instead of a hard reject.
 	return m.selfSignedForSNI(name)
+}
+
+// firstUploadedCert returns any manually-uploaded certificate from the map,
+// used as a last-resort fallback before generating a self-signed one.
+func (m *Manager) firstUploadedCert() *tls.Certificate {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, c := range m.certs {
+		return c
+	}
+	return nil
 }
 
 // selfSignedForSNI returns a self-signed certificate whose SAN matches name,

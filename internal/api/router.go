@@ -22,6 +22,8 @@ type Options struct {
 	MasterKey   []byte                // AES-256-GCM key for private key encryption at rest
 	Aggregator  *analytics.Aggregator // optional; nil disables real-time metrics
 	WAFEngine   *waf.Engine           // optional; nil disables built-in rule endpoints
+	HTTPAddr    string                // proxy HTTP listen address, e.g. ":80"
+	HTTPSAddr   string                // proxy HTTPS listen address, e.g. ":443"
 }
 
 // NewRouter builds and returns the complete /api/v1 handler.
@@ -31,6 +33,7 @@ func NewRouter(opts Options) http.Handler {
 	mux := http.NewServeMux()
 
 	authH := auth.NewHandler(opts.Store, opts.Issuer)
+	infoH := &infoHandler{httpAddr: opts.HTTPAddr, httpsAddr: opts.HTTPSAddr}
 	sitesH := &sitesHandler{store: opts.Store, reload: opts.ProxyReload}
 	rulesH := &rulesHandler{store: opts.Store, reload: opts.WAFReload, engine: opts.WAFEngine}
 	certsH := &certsHandler{store: opts.Store, masterKey: opts.MasterKey, reload: opts.CertReload}
@@ -41,6 +44,9 @@ func NewRouter(opts Options) http.Handler {
 	ipListH := &ipListHandler{store: opts.Store, reload: opts.ProxyReload}
 
 	iss := opts.Issuer
+
+	// ── Info (public — proxy port info for the UI) ──────────────────────────
+	mux.Handle("GET /api/v1/info", iss.RequireAuth(http.HandlerFunc(infoH.Get)))
 
 	// ── Auth (public endpoints) ──────────────────────────────────────────────
 	mux.HandleFunc("POST /api/v1/auth/login", authH.Login)

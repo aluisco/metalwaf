@@ -87,7 +87,6 @@ type CountEntry struct {
 
 type Certificate struct {
 	ID        string
-	SiteID    string
 	Domain    string
 	Source    string // manual | letsencrypt
 	CertPEM   string
@@ -177,7 +176,6 @@ type Store interface {
 	// ── Certificates
 	CreateCertificate(ctx context.Context, c *Certificate) error
 	GetCertificateByID(ctx context.Context, id string) (*Certificate, error)
-	GetCertificateBySiteID(ctx context.Context, siteID string) (*Certificate, error)
 	UpdateCertificate(ctx context.Context, c *Certificate) error
 	DeleteCertificate(ctx context.Context, id string) error
 	ListCertificates(ctx context.Context) ([]*Certificate, error)

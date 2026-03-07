@@ -277,8 +277,11 @@ func (h *Handler) storeRequestLog(r *http.Request, site *database.Site, ip strin
 		l.Blocked = result.Blocked
 		l.ThreatScore = result.Score
 		if len(result.MatchedRules) > 0 {
-			rid := result.MatchedRules[0].Rule.Name
-			l.RuleID = &rid
+			// Only set rule_id FK for custom rules that exist in the DB.
+			// Builtin rules are in-memory only and have no waf_rules row.
+			if top := result.MatchedRules[0].Rule; !top.Builtin && top.ID != "" {
+				l.RuleID = &top.ID
+			}
 		}
 	}
 

@@ -64,8 +64,11 @@ async function _refresh() {
     clearTokens()
     throw new Error('session expired')
   }
-  const { data } = await res.json()
-  setTokens(data)
+  // Auth endpoints use writeAuthJSON (no {"data":...} envelope).
+  // Other endpoints use respond() which wraps in {"data":...}.
+  // Handle both formats defensively.
+  const body = await res.json()
+  setTokens(body.data ?? body)
 }
 
 /**
@@ -183,10 +186,16 @@ export const rules = {
 export const certs = {
   list: () => apiFetch('/certificates'),
   get: (id) => apiFetch(`/certificates/${id}`),
-  upload: (data) => apiFetch('/certificates', { method: 'POST', body: JSON.stringify(data) }),
+  upload: ({ domain, cert, key }) => apiFetch('/certificates', { method: 'POST', body: JSON.stringify({ domain, cert_pem: cert, key_pem: key }) }),
   delete: (id) => apiFetch(`/certificates/${id}`, { method: 'DELETE' }),
   requestACME: (domain) =>
     apiFetch('/certificates/letsencrypt', { method: 'POST', body: JSON.stringify({ domain }) }),
+}
+
+// ── Info ──────────────────────────────────────────────────────────────────────
+
+export const info = {
+  get: () => apiFetch('/info'),
 }
 
 // ── Analytics ─────────────────────────────────────────────────────────────────

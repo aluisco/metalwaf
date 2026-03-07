@@ -1,35 +1,32 @@
 import { NavLink } from 'react-router-dom'
 import {
-  CSidebar, CSidebarBrand, CSidebarNav,
-  CSidebarToggler, CSidebarHeader, CSidebarFooter,
+  CSidebar, CSidebarBrand, CSidebarHeader,
+  CSidebarFooter, CSidebarToggler, CCloseButton,
 } from '@coreui/react'
-import SimpleBar from 'simplebar-react'
 import AppSidebarNav from './AppSidebarNav'
 import _nav from '../_nav'
 
 export default function DefaultSidebar({ sidebarShow, setSidebarShow, unfoldable, setUnfoldable }) {
   return (
     <CSidebar
+      className="border-end"
       colorScheme="dark"
       position="fixed"
       unfoldable={unfoldable}
       visible={sidebarShow}
-      onVisibleChange={setSidebarShow}
+      onVisibleChange={(v) => !unfoldable && setSidebarShow(v)}
     >
       <CSidebarHeader className="border-bottom border-bottom-subtle">
-        <CSidebarBrand as={NavLink} to="/dashboard" className="sidebar-brand">
-          <span className="brand-icon">🛡</span>
-          <span>MetalWAF</span>
+        <CSidebarBrand as={NavLink} to="/dashboard" className="sidebar-brand w-100 d-flex flex-column align-items-center justify-content-center py-2 text-center" style={{ textDecoration: 'none' }}>
+          <span style={{ fontSize: '2rem', lineHeight: 1 }}>🛡</span>
+          <span style={{ fontSize: '1.4rem', fontWeight: 700, letterSpacing: '0.05em' }}>MetalWAF</span>
         </CSidebarBrand>
+        <CCloseButton className="d-lg-none" dark onClick={() => setSidebarShow(false)} />
       </CSidebarHeader>
 
-      <CSidebarNav>
-        <SimpleBar style={{ height: '100%', minHeight: 0 }}>
-          <AppSidebarNav items={_nav} />
-        </SimpleBar>
-      </CSidebarNav>
+      <AppSidebarNav items={_nav} />
 
-      <CSidebarFooter className="border-top border-top-subtle d-none d-lg-flex">
+      <CSidebarFooter className="border-top d-none d-lg-flex">
         <CSidebarToggler onClick={() => setUnfoldable(v => !v)} />
       </CSidebarFooter>
     </CSidebar>

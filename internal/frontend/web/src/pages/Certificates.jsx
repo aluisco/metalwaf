@@ -126,9 +126,10 @@ export default function Certificates() {
         <form onSubmit={handleUpload}>
           <CModalBody>
             <div className="mb-3">
-              <CFormLabel>Domain</CFormLabel>
+              <CFormLabel>Domain *</CFormLabel>
               <CFormInput placeholder="example.com" value={form.domain} required
                 onChange={e => setForm(f => ({...f, domain: e.target.value}))} />
+              <div className="form-text">Domain this certificate will serve (may differ from the cert CN/SAN).</div>
             </div>
             <div className="mb-3">
               <CFormLabel>Certificate (PEM)</CFormLabel>

@@ -233,6 +233,8 @@ func main() {
 		MasterKey:   masterKey,
 		Aggregator:  agg,
 		WAFEngine:   wafEngine,
+		HTTPAddr:    cfg.Server.HTTPAddr,
+		HTTPSAddr:   cfg.Server.HTTPSAddr,
 	})
 
 	// ── Admin / health server (:9090) ────────────────────────────────────────

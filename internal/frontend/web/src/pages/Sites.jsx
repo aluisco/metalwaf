@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { sites as api } from '../api.js'
+import { sites as api, certs as certsApi, info as infoApi } from '../api.js'
 import {
   CButton, CAlert, CSpinner, CBadge,
   CTable, CTableHead, CTableBody, CTableRow, CTableHeaderCell, CTableDataCell,
@@ -14,11 +14,34 @@ const WAF_MODES = ['off', 'detect', 'block']
 const EMPTY_SITE = { name: '', domain: '', waf_mode: 'detect', https_only: false, enabled: true }
 const EMPTY_UP   = { url: '', weight: 1, enabled: true }
 
+function addrToPort(addr) {
+  if (!addr) return null
+  const m = addr.match(/:(\d+)$/)
+  return m ? m[1] : null
+}
+
+function certForDomain(certList, domain) {
+  if (!domain) return null
+  const d = domain.toLowerCase()
+  return certList.find(c => {
+    const cd = (c.domain || '').toLowerCase()
+    if (cd === d) return true
+    if (cd.startsWith('*.')) {
+      const suffix = cd.slice(2)
+      const dot = d.indexOf('.')
+      if (dot >= 0 && d.slice(dot + 1) === suffix) return true
+    }
+    return false
+  }) ?? null
+}
+
 export default function Sites() {
-  const [list, setList]       = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState('')
-  const [saving, setSaving]   = useState(false)
+  const [list, setList]           = useState([])
+  const [certList, setCertList]   = useState([])
+  const [proxyInfo, setProxyInfo] = useState(null)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [saving, setSaving]       = useState(false)
 
   const [siteOpened, { open: openSite, close: closeSite }] = useDisclosure()
   const [upOpened,   { open: openUp,   close: closeUp   }] = useDisclosure()
@@ -35,7 +58,15 @@ export default function Sites() {
 
   const load = () => {
     setLoading(true)
-    api.list().then(setList).catch(e => setError(e.message)).finally(() => setLoading(false))
+    Promise.all([
+      api.list(),
+      certsApi.list().catch(() => []),
+      infoApi.get().catch(() => null),
+    ]).then(([sites, certs, inf]) => {
+      setList(sites)
+      setCertList(certs)
+      setProxyInfo(inf)
+    }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }
   useEffect(load, [])
 
@@ -81,15 +112,28 @@ export default function Sites() {
     catch (err) { notifications.show({ title: 'Error', message: err.message, color: 'red' }) }
   }
 
+  const httpPort  = addrToPort(proxyInfo?.http_addr)  ?? '80'
+  const httpsPort = addrToPort(proxyInfo?.https_addr) ?? '443'
+
   if (loading) return <div className="text-center py-5"><CSpinner color="primary" /></div>
   if (error)   return <CAlert color="danger">{error}</CAlert>
 
   return (
     <>
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <div className="d-flex justify-content-between align-items-center mb-3">
         <h2 className="mb-0 fw-semibold">Sites</h2>
         <CButton color="primary" onClick={startCreate}>+ New site</CButton>
       </div>
+
+      {/* Proxy ports info banner */}
+      <CAlert color="info" className="mb-4 py-2 d-flex flex-wrap align-items-center gap-3">
+        <span className="fw-semibold">Proxy:</span>
+        <span><CBadge color="secondary" className="me-1">HTTP</CBadge>port <strong>{httpPort}</strong></span>
+        <span><CBadge color="primary" className="me-1">HTTPS</CBadge>port <strong>{httpsPort}</strong></span>
+        <span className="text-body-secondary small">
+          Certificates are matched automatically by domain (SNI). Upload the cert in the <strong>Certificates</strong> page using the same domain as the site.
+        </span>
+      </CAlert>
 
       {list.length === 0 ? (
         <p className="text-body-secondary">No sites configured yet.</p>
@@ -99,49 +143,78 @@ export default function Sites() {
             <CTableHeaderCell>Name</CTableHeaderCell>
             <CTableHeaderCell>Domain</CTableHeaderCell>
             <CTableHeaderCell>WAF Mode</CTableHeaderCell>
-            <CTableHeaderCell>HTTPS only</CTableHeaderCell>
+            <CTableHeaderCell>SSL/TLS</CTableHeaderCell>
+            <CTableHeaderCell>Redirect HTTP→HTTPS</CTableHeaderCell>
             <CTableHeaderCell>Status</CTableHeaderCell>
             <CTableHeaderCell>Actions</CTableHeaderCell>
           </CTableRow></CTableHead>
           <CTableBody>
-            {list.map(s => (
-              <CTableRow key={s.id}>
-                <CTableDataCell><strong>{s.name}</strong></CTableDataCell>
-                <CTableDataCell><code>{s.domain}</code></CTableDataCell>
-                <CTableDataCell><WafBadge mode={s.waf_mode} /></CTableDataCell>
-                <CTableDataCell>{s.https_only ? '✓' : '—'}</CTableDataCell>
-                <CTableDataCell>
-                  <CBadge color={s.enabled ? 'success' : 'secondary'}>{s.enabled ? 'active' : 'disabled'}</CBadge>
-                </CTableDataCell>
-                <CTableDataCell>
-                  <div className="d-flex gap-1">
-                    <CButton size="sm" color="primary" variant="outline" onClick={() => startEdit(s)}>Edit</CButton>
-                    <CButton size="sm" color="info"    variant="outline" onClick={() => openUpstreams(s)}>Upstreams</CButton>
-                    <CButton size="sm" color="danger"  variant="outline" onClick={() => setDelSite(s)}>Delete</CButton>
-                  </div>
-                </CTableDataCell>
-              </CTableRow>
-            ))}
+            {list.map(s => {
+              const cert = certForDomain(certList, s.domain)
+              return (
+                <CTableRow key={s.id}>
+                  <CTableDataCell><strong>{s.name}</strong></CTableDataCell>
+                  <CTableDataCell><code>{s.domain}</code></CTableDataCell>
+                  <CTableDataCell><WafBadge mode={s.waf_mode} /></CTableDataCell>
+                  <CTableDataCell>
+                    {cert
+                      ? <CBadge color="success" title={cert.expires_at ? `Expires: ${new Date(cert.expires_at).toLocaleDateString()}` : ''}>✓ {cert.domain}</CBadge>
+                      : <CBadge color="danger">✗ No cert</CBadge>
+                    }
+                  </CTableDataCell>
+                  <CTableDataCell>
+                    {s.https_only
+                      ? <CBadge color="info">:{httpPort} → :{httpsPort}</CBadge>
+                      : <span className="text-body-secondary">—</span>
+                    }
+                  </CTableDataCell>
+                  <CTableDataCell>
+                    <CBadge color={s.enabled ? 'success' : 'secondary'}>{s.enabled ? 'active' : 'disabled'}</CBadge>
+                  </CTableDataCell>
+                  <CTableDataCell>
+                    <div className="d-flex gap-1">
+                      <CButton size="sm" color="primary" variant="outline" onClick={() => startEdit(s)}>Edit</CButton>
+                      <CButton size="sm" color="info"    variant="outline" onClick={() => openUpstreams(s)}>Upstreams</CButton>
+                      <CButton size="sm" color="danger"  variant="outline" onClick={() => setDelSite(s)}>Delete</CButton>
+                    </div>
+                  </CTableDataCell>
+                </CTableRow>
+              )
+            })}
           </CTableBody>
         </CTable>
       )}
 
-      {/* Site modal */}
+      {/* Site create/edit modal */}
       <CModal visible={siteOpened} onClose={closeSite} alignment="center">
         <CModalHeader><CModalTitle>{current ? 'Edit site' : 'New site'}</CModalTitle></CModalHeader>
         <CForm onSubmit={saveSite}>
           <CModalBody>
-            <div className="mb-3"><CFormLabel>Name *</CFormLabel><CFormInput value={siteForm.name} onChange={e => setSiteForm(f=>({...f,name:e.target.value}))} required /></div>
-            <div className="mb-3"><CFormLabel>Domain *</CFormLabel><CFormInput placeholder="example.com" value={siteForm.domain} onChange={e => setSiteForm(f=>({...f,domain:e.target.value}))} required /></div>
+            <div className="mb-3">
+              <CFormLabel>Name *</CFormLabel>
+              <CFormInput value={siteForm.name} onChange={e => setSiteForm(f=>({...f,name:e.target.value}))} required />
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Domain *</CFormLabel>
+              <CFormInput placeholder="example.com" value={siteForm.domain} onChange={e => setSiteForm(f=>({...f,domain:e.target.value}))} required />
+              <div className="form-text">Use the same value when uploading the certificate in the Certificates page.</div>
+            </div>
             <div className="mb-3">
               <CFormLabel>WAF Mode</CFormLabel>
               <CFormSelect value={siteForm.waf_mode} onChange={e => setSiteForm(f=>({...f,waf_mode:e.target.value}))}>
                 {WAF_MODES.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase()+m.slice(1)}</option>)}
               </CFormSelect>
             </div>
-            <div className="d-flex gap-4">
-              <CFormCheck label="HTTPS only" checked={siteForm.https_only} onChange={e => setSiteForm(f=>({...f,https_only:e.target.checked}))} />
-              <CFormCheck label="Enabled"    checked={siteForm.enabled}    onChange={e => setSiteForm(f=>({...f,enabled:e.target.checked}))} />
+            <div className="mb-2">
+              <CFormCheck
+                label={`Redirect HTTP→HTTPS (301: port ${httpPort} → port ${httpsPort})`}
+                checked={siteForm.https_only}
+                onChange={e => setSiteForm(f=>({...f,https_only:e.target.checked}))}
+              />
+              <div className="form-text ms-4">HTTP connections are automatically redirected to HTTPS. Requires a valid certificate.</div>
+            </div>
+            <div>
+              <CFormCheck label="Enabled" checked={siteForm.enabled} onChange={e => setSiteForm(f=>({...f,enabled:e.target.checked}))} />
             </div>
           </CModalBody>
           <CModalFooter>
@@ -187,13 +260,19 @@ export default function Sites() {
         <CModalFooter><CButton color="secondary" onClick={closePanel}>Close</CButton></CModalFooter>
       </CModal>
 
-      {/* Upstream edit */}
+      {/* Upstream create/edit */}
       <CModal visible={upOpened} onClose={closeUp} alignment="center">
         <CModalHeader><CModalTitle>{currentUp ? 'Edit upstream' : 'Add upstream'}</CModalTitle></CModalHeader>
         <CForm onSubmit={saveUpstream}>
           <CModalBody>
-            <div className="mb-3"><CFormLabel>URL *</CFormLabel><CFormInput placeholder="http://10.0.0.1:8080" value={upForm.url} onChange={e => setUpForm(f=>({...f,url:e.target.value}))} required /></div>
-            <div className="mb-3"><CFormLabel>Weight</CFormLabel><CFormInput type="number" min={1} max={100} value={upForm.weight} onChange={e => setUpForm(f=>({...f,weight:+e.target.value}))} /></div>
+            <div className="mb-3">
+              <CFormLabel>URL *</CFormLabel>
+              <CFormInput placeholder="http://10.0.0.1:8080" value={upForm.url} onChange={e => setUpForm(f=>({...f,url:e.target.value}))} required />
+            </div>
+            <div className="mb-3">
+              <CFormLabel>Weight</CFormLabel>
+              <CFormInput type="number" min={1} max={100} value={upForm.weight} onChange={e => setUpForm(f=>({...f,weight:+e.target.value}))} />
+            </div>
             <CFormCheck label="Enabled" checked={upForm.enabled} onChange={e => setUpForm(f=>({...f,enabled:e.target.checked}))} />
           </CModalBody>
           <CModalFooter>

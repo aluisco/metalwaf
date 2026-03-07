@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,7 +23,6 @@ type certsHandler struct {
 // The private key is never returned to the client.
 type certResponse struct {
 	ID        string     `json:"id"`
-	SiteID    string     `json:"site_id,omitempty"`
 	Domain    string     `json:"domain"`
 	Source    string     `json:"source"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
@@ -33,7 +33,6 @@ type certResponse struct {
 func toCertResponse(c *database.Certificate) certResponse {
 	return certResponse{
 		ID:        c.ID,
-		SiteID:    c.SiteID,
 		Domain:    c.Domain,
 		Source:    c.Source,
 		ExpiresAt: c.ExpiresAt,
@@ -82,7 +81,7 @@ func (h *certsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // ─── Create (manual upload) ───────────────────────────────────────────────────
 
 type createCertRequest struct {
-	SiteID    string `json:"site_id"`    // optional — global cert if empty
+	Domain    string `json:"domain"`     // optional override: domain this cert should serve (defaults to cert CN)
 	CertPEM   string `json:"cert_pem"`   // required: PEM-encoded certificate (chain)
 	KeyPEM    string `json:"key_pem"`    // required: PEM-encoded private key
 	AutoRenew bool   `json:"auto_renew"` // enable Let's Encrypt auto-renewal
@@ -103,23 +102,6 @@ func (h *certsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate site reference if provided.
-	if req.SiteID != "" {
-		if _, err := uuid.Parse(req.SiteID); err != nil {
-			respondError(w, http.StatusBadRequest, "invalid site_id")
-			return
-		}
-		site, err := h.store.GetSiteByID(r.Context(), req.SiteID)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, "database error")
-			return
-		}
-		if site == nil {
-			respondError(w, http.StatusNotFound, "site not found")
-			return
-		}
-	}
-
 	// Parse and validate the cert+key pair.
 	_, info, err := certificates.ParsePair([]byte(req.CertPEM), []byte(req.KeyPEM))
 	if err != nil {
@@ -134,11 +116,17 @@ func (h *certsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use the caller-supplied domain override if present; otherwise fall back
+	// to the primary domain extracted from the certificate's CN / SAN list.
+	certDomain := strings.TrimSpace(strings.ToLower(req.Domain))
+	if certDomain == "" {
+		certDomain = info.Domains[0]
+	}
+
 	expiresAt := info.ExpiresAt
 	c := &database.Certificate{
 		ID:        uuid.NewString(),
-		SiteID:    req.SiteID,
-		Domain:    info.Domains[0], // primary domain
+		Domain:    certDomain,
 		Source:    "manual",
 		CertPEM:   req.CertPEM,
 		KeyPEM:    string(encryptedKey),

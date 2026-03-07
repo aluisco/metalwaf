@@ -535,20 +535,20 @@ func scanWAFRuleRow(rows *sql.Rows) (*database.WAFRule, error) {
 
 // ─── Certificates ─────────────────────────────────────────────────────────────
 
-const certSelect = `SELECT id, site_id, domain, source, cert_pem, key_pem, expires_at, auto_renew, created_at, updated_at FROM certificates`
+const certSelect = `SELECT id, domain, source, cert_pem, key_pem, expires_at, auto_renew, created_at, updated_at FROM certificates`
 
 func (s *Store) CreateCertificate(ctx context.Context, c *database.Certificate) error {
 	const q = `
 		INSERT INTO certificates
-		  (id, site_id, domain, source, cert_pem, key_pem, expires_at, auto_renew, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		  (id, domain, source, cert_pem, key_pem, expires_at, auto_renew, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if c.ID == "" {
 		c.ID = newID()
 	}
 	now := time.Now().UTC()
 	c.CreatedAt, c.UpdatedAt = now, now
 	_, err := s.db.ExecContext(ctx, q,
-		c.ID, c.SiteID, c.Domain, c.Source, c.CertPEM, c.KeyPEM,
+		c.ID, c.Domain, c.Source, c.CertPEM, c.KeyPEM,
 		nullTime(c.ExpiresAt), boolInt(c.AutoRenew),
 		c.CreatedAt, c.UpdatedAt,
 	)
@@ -557,11 +557,6 @@ func (s *Store) CreateCertificate(ctx context.Context, c *database.Certificate) 
 
 func (s *Store) GetCertificateByID(ctx context.Context, id string) (*database.Certificate, error) {
 	return scanCertificate(s.db.QueryRowContext(ctx, certSelect+" WHERE id=?", id))
-}
-
-func (s *Store) GetCertificateBySiteID(ctx context.Context, siteID string) (*database.Certificate, error) {
-	return scanCertificate(s.db.QueryRowContext(ctx,
-		certSelect+" WHERE site_id=? ORDER BY created_at DESC LIMIT 1", siteID))
 }
 
 func (s *Store) UpdateCertificate(ctx context.Context, c *database.Certificate) error {
@@ -604,7 +599,7 @@ func scanCertificate(row *sql.Row) (*database.Certificate, error) {
 	var c database.Certificate
 	var expiresAt sql.NullTime
 	var autoRenew int
-	err := row.Scan(&c.ID, &c.SiteID, &c.Domain, &c.Source, &c.CertPEM, &c.KeyPEM,
+	err := row.Scan(&c.ID, &c.Domain, &c.Source, &c.CertPEM, &c.KeyPEM,
 		&expiresAt, &autoRenew, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -623,7 +618,7 @@ func scanCertRow(rows *sql.Rows) (*database.Certificate, error) {
 	var c database.Certificate
 	var expiresAt sql.NullTime
 	var autoRenew int
-	err := rows.Scan(&c.ID, &c.SiteID, &c.Domain, &c.Source, &c.CertPEM, &c.KeyPEM,
+	err := rows.Scan(&c.ID, &c.Domain, &c.Source, &c.CertPEM, &c.KeyPEM,
 		&expiresAt, &autoRenew, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err

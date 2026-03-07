@@ -6,7 +6,7 @@ import DefaultHeader  from './DefaultHeader'
 import { subscribeToasts } from '../lib/notifications'
 
 export default function DefaultLayout() {
-  const [sidebarShow,       setSidebarShow]       = useState(true)
+  const [sidebarShow, setSidebarShow] = useState(true)
   const [sidebarUnfoldable, setSidebarUnfoldable] = useState(false)
   const [toasts, setToasts] = useState([])
   const toastRef = useRef()
@@ -35,7 +35,7 @@ export default function DefaultLayout() {
         />
 
         <div className="body flex-grow-1">
-          <CContainer lg className="py-4">
+          <CContainer className="px-4" lg>
             <Outlet />
           </CContainer>
         </div>

@@ -1,10 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { CNavItem, CNavTitle, CNavLink } from '@coreui/react'
+import { CNavItem, CNavTitle, CNavLink, CSidebarNav } from '@coreui/react'
 import CIcon from '@coreui/icons-react'
 
 export default function AppSidebarNav({ items }) {
   return (
-    <>
+    <CSidebarNav>
       {items.map((item, idx) => {
         if (item.component === 'CNavTitle') {
           return <CNavTitle key={idx}>{item.name}</CNavTitle>
@@ -23,6 +23,6 @@ export default function AppSidebarNav({ items }) {
           </CNavItem>
         )
       })}
-    </>
+    </CSidebarNav>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   CHeader, CHeaderNav, CHeaderToggler, CContainer,
@@ -33,11 +33,22 @@ function useBreadcrumbs() {
 
 export default function DefaultHeader({ sidebarShow, toggleSidebar }) {
   const navigate = useNavigate()
+  const headerRef = useRef()
   const [me, setMe] = useState(null)
   const breadcrumbs = useBreadcrumbs()
 
   useEffect(() => {
     profileApi.get().then(setMe).catch(() => {})
+  }, [])
+
+  // Add scroll shadow exactly like the CoreUI template
+  useEffect(() => {
+    const handleScroll = () => {
+      headerRef.current &&
+        headerRef.current.classList.toggle('shadow-sm', document.documentElement.scrollTop > 0)
+    }
+    document.addEventListener('scroll', handleScroll)
+    return () => document.removeEventListener('scroll', handleScroll)
   }, [])
 
   async function handleLogout() {
@@ -49,20 +60,11 @@ export default function DefaultHeader({ sidebarShow, toggleSidebar }) {
   const initials = me?.username?.slice(0, 2).toUpperCase() ?? '??'
 
   return (
-    <CHeader position="sticky" className="p-0 border-bottom">
-      <CContainer fluid className="px-4 min-h-10">
+    <CHeader position="sticky" className="mb-4 p-0" ref={headerRef}>
+      <CContainer fluid className="border-bottom px-4">
         <CHeaderToggler onClick={toggleSidebar} style={{ marginInlineStart: '-14px' }}>
           <CIcon icon={cilMenu} size="lg" />
         </CHeaderToggler>
-
-        <CBreadcrumb className="d-none d-md-flex ms-3 mb-0 p-0 bg-transparent">
-          <CBreadcrumbItem href="/dashboard">Home</CBreadcrumbItem>
-          {breadcrumbs.map(b =>
-            b.active
-              ? <CBreadcrumbItem key={b.path} active>{b.label}</CBreadcrumbItem>
-              : <CBreadcrumbItem key={b.path} href={b.path}>{b.label}</CBreadcrumbItem>
-          )}
-        </CBreadcrumb>
 
         <CHeaderNav className="ms-auto">
           <CDropdown variant="nav-item">
@@ -99,6 +101,16 @@ export default function DefaultHeader({ sidebarShow, toggleSidebar }) {
             </CDropdownMenu>
           </CDropdown>
         </CHeaderNav>
+      </CContainer>
+      <CContainer className="px-4" fluid>
+        <CBreadcrumb className="my-0">
+          <CBreadcrumbItem href="/dashboard">Home</CBreadcrumbItem>
+          {breadcrumbs.map(b =>
+            b.active
+              ? <CBreadcrumbItem key={b.path} active>{b.label}</CBreadcrumbItem>
+              : <CBreadcrumbItem key={b.path} href={b.path}>{b.label}</CBreadcrumbItem>
+          )}
+        </CBreadcrumb>
       </CContainer>
     </CHeader>
   )

@@ -296,8 +296,8 @@ func (e *Engine) Inspect(r *http.Request, site *database.Site) *InspectResult {
 		result.Blocked = true
 	}
 
-	// Detect mode: record matches but never block.
-	if site.WAFMode == "detect" {
+	// Monitor mode: record matches but never block.
+	if site.WAFMode == "monitor" {
 		result.Blocked = false
 	}
 

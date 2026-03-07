@@ -10,8 +10,8 @@ import { useDisclosure } from '../lib/use-disclosure.js'
 import { notifications } from '../lib/notifications.js'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 
-const WAF_MODES = ['off', 'detect', 'block']
-const EMPTY_SITE = { name: '', domain: '', waf_mode: 'detect', https_only: false, enabled: true }
+const WAF_MODES = ['off', 'monitor', 'protect']
+const EMPTY_SITE = { name: '', domain: '', waf_mode: 'monitor', https_only: false, enabled: true }
 const EMPTY_UP   = { url: '', weight: 1, enabled: true }
 
 function addrToPort(addr) {
@@ -289,6 +289,6 @@ export default function Sites() {
 }
 
 function WafBadge({ mode }) {
-  const map = { block: 'danger', detect: 'warning', off: 'secondary' }
+  const map = { protect: 'danger', monitor: 'warning', off: 'secondary' }
   return <CBadge color={map[mode] ?? 'secondary'}>{mode}</CBadge>
 }

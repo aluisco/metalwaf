@@ -36,7 +36,7 @@ type Site struct {
 	ID             string
 	Name           string
 	Domain         string
-	WAFMode        string // detect | block | off
+	WAFMode        string // monitor | protect | off
 	HTTPSOnly      bool
 	Enabled        bool
 	RateLimitRPS   float64 // 0 = inherit global

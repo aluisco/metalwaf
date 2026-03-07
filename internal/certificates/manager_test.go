@@ -303,6 +303,13 @@ func (m *managerMockStore) SetSetting(_ context.Context, key, value string) erro
 	return nil
 }
 
+func (m *managerMockStore) CreateCertificate(_ context.Context, c *database.Certificate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.certs = append(m.certs, c)
+	return nil
+}
+
 func TestManager_EmptyDB_FallsBackToSelfSigned(t *testing.T) {
 	store := newManagerMockStore()
 	mgr := NewManager(store, nil)

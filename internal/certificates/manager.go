@@ -130,11 +130,103 @@ func (m *Manager) Reload(ctx context.Context) error {
 	return m.Load(ctx)
 }
 
+// EnsurePersistedCert returns a self-signed certificate for the given primary
+// domain and SANs. On first call it generates the cert and persists it in the
+// database (source="self-signed") so subsequent restarts loads it from DB
+// instead of generating a new one. If a user-uploaded cert already exists for
+// domain it is used as-is (it will have been loaded by Load already).
+//
+// This is used for the admin HTTPS server and per-SNI fallback certs so that
+// browsers do not see a different certificate fingerprint on every restart.
+func (m *Manager) EnsurePersistedCert(ctx context.Context, domain string, sans ...string) (*tls.Certificate, error) {
+	// Fast path: already loaded in the cert map (either user-uploaded or
+	// a previously-persisted self-signed cert).
+	key := strings.ToLower(domain)
+	m.mu.RLock()
+	if c, ok := m.certs[key]; ok {
+		m.mu.RUnlock()
+		return c, nil
+	}
+	m.mu.RUnlock()
+
+	// Slow path: look for an existing self-signed cert in the DB.
+	dbCerts, err := m.store.ListCertificates(ctx)
+	if err == nil {
+		for _, c := range dbCerts {
+			if strings.ToLower(c.Domain) == key && c.Source == "self-signed" {
+				keyPEM, kerr := DecryptKey([]byte(c.KeyPEM), m.masterKey)
+				if kerr != nil {
+					break
+				}
+				tlsCert, _, perr := ParsePair([]byte(c.CertPEM), keyPEM)
+				if perr != nil {
+					break
+				}
+				// Cache it in the live map for fast lookups.
+				m.mu.Lock()
+				m.certs[key] = tlsCert
+				m.mu.Unlock()
+				slog.Debug("certificates: reusing persisted self-signed cert", "domain", domain)
+				return tlsCert, nil
+			}
+		}
+	}
+
+	// Generate a new self-signed cert that includes both the domain and all SANs.
+	hosts := append([]string{domain}, sans...)
+	tlsCert, err := GenerateSelfSignedForHosts(hosts...)
+	if err != nil {
+		return nil, fmt.Errorf("EnsurePersistedCert: generate: %w", err)
+	}
+
+	// Encode back to PEM for storage.
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsCert.Certificate[0]})
+	keyDER, err := x509.MarshalECPrivateKey(tlsCert.PrivateKey.(*ecdsa.PrivateKey))
+	if err != nil {
+		return nil, fmt.Errorf("EnsurePersistedCert: marshal key: %w", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	// Encrypt if master key configured.
+	storedKey := string(keyPEM)
+	if encrypted, eerr := EncryptKey(keyPEM, m.masterKey); eerr == nil {
+		storedKey = string(encrypted)
+	}
+
+	expiry := time.Now().Add(10 * 365 * 24 * time.Hour)
+	dbCert := &database.Certificate{
+		Domain:    domain,
+		Source:    "self-signed",
+		CertPEM:   string(certPEM),
+		KeyPEM:    storedKey,
+		ExpiresAt: &expiry,
+	}
+	if serr := m.store.CreateCertificate(ctx, dbCert); serr != nil {
+		// Persist failure is non-fatal: cert still works this session.
+		slog.Warn("certificates: could not persist self-signed cert", "domain", domain, "error", serr)
+	} else {
+		slog.Info("certificates: generated and persisted self-signed cert", "domain", domain)
+	}
+
+	// Add to live map.
+	m.mu.Lock()
+	m.certs[key] = tlsCert
+	m.mu.Unlock()
+	return tlsCert, nil
+}
+
 // GetCertificate is the tls.Config.GetCertificate callback.
 // It selects the best certificate for the requested SNI name.
 func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	// No SNI → return fallback immediately.
+	// No SNI → prefer the persisted localhost cert (same identity as admin server);
+	// fall back to the ephemeral in-memory cert if not yet loaded.
 	if hello.ServerName == "" {
+		m.mu.RLock()
+		c, ok := m.certs["localhost"]
+		m.mu.RUnlock()
+		if ok {
+			return c, nil
+		}
 		return m.fallback, nil
 	}
 	name := strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))
@@ -162,44 +254,33 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 		return acmeCert, nil
 	}
 
-	// 4. If the user has uploaded any certificate, prefer it over a
-	// MetalWAF-generated self-signed cert. This handles the common case where
-	// the cert's own CN/SANs don't exactly match the site domain but the user
-	// explicitly chose to use that cert.
-	if c := m.firstUploadedCert(); c != nil {
-		return c, nil
-	}
-
-	// 5. No uploaded cert at all. Return a per-SNI self-signed cert so the
-	// browser can show "proceed anyway" instead of a hard reject.
-	return m.selfSignedForSNI(name)
+	// 4. No match — return a per-SNI self-signed cert (persisted across restarts).
+	return m.selfSignedForSNI(name, hello.Context())
 }
 
-// firstUploadedCert returns any manually-uploaded certificate from the map,
-// used as a last-resort fallback before generating a self-signed one.
-func (m *Manager) firstUploadedCert() *tls.Certificate {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, c := range m.certs {
-		return c
-	}
-	return nil
-}
-
-// selfSignedForSNI returns a self-signed certificate whose SAN matches name,
-// generating and caching one on first use.
-func (m *Manager) selfSignedForSNI(name string) (*tls.Certificate, error) {
+// selfSignedForSNI returns a self-signed certificate whose SAN matches name.
+// The cert is persisted to the database on first use so subsequent restarts
+// serve the same fingerprint (no browser security warnings after accepting once).
+// An in-memory singleflight-style mutex prevents duplicate generation under load.
+func (m *Manager) selfSignedForSNI(name string, ctx context.Context) (*tls.Certificate, error) {
+	// Check in-memory cache first (avoids DB round-trip on hot path).
 	m.devMu.Lock()
-	defer m.devMu.Unlock()
 	if c, ok := m.devCerts[name]; ok {
+		m.devMu.Unlock()
 		return c, nil
 	}
-	c, err := GenerateSelfSignedForHosts(name)
+	m.devMu.Unlock()
+
+	// Ensure persisted (generate + save on first call, reload on subsequent).
+	c, err := m.EnsurePersistedCert(ctx, name)
 	if err != nil {
-		// Failsafe: generic fallback is better than no cert at all.
+		// Failsafe: generic fallback rather than a hard TLS failure.
 		return m.fallback, nil
 	}
+
+	m.devMu.Lock()
 	m.devCerts[name] = c
+	m.devMu.Unlock()
 	return c, nil
 }
 

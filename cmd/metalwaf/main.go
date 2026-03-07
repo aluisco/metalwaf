@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -261,31 +260,33 @@ func main() {
 	spaHandler := spaFileServer(http.FS(webFS))
 	mux.Handle("/", spaHandler)
 
-	// Admin TLS: generate a self-signed cert with SANs for localhost/loopback
-	// and the configured admin host (if any). This allows browsers to offer
-	// the "proceed anyway" warning rather than a hard reject.
-	adminHost, _, _ := net.SplitHostPort(cfg.Server.AdminAddr)
-	if adminHost == "" || adminHost == "0.0.0.0" || adminHost == "::" {
-		adminHost = "" // already covered by localhost entries below
+	// Admin TLS: use the certificate manager so that:
+	//   a) the self-signed cert is persisted in the DB and reused on restarts
+	//      (no new fingerprint every time → browser accepts it after first click)
+	//   b) uploading a cert for "localhost" (or the admin hostname) in the
+	//      Certificates page automatically replaces the self-signed cert.
+	//
+	// Prime the cert for the admin address so the first TLS handshake does not
+	// block on generation.
+	adminHost := cfg.Server.AdminAddr
+	if h, _, err2 := net.SplitHostPort(cfg.Server.AdminAddr); err2 == nil {
+		adminHost = h
+	}
+	if adminHost == "0.0.0.0" || adminHost == "::" {
+		adminHost = ""
 	}
 	adminSANs := []string{"localhost", "127.0.0.1", "::1"}
 	if adminHost != "" && adminHost != "localhost" {
 		adminSANs = append(adminSANs, adminHost)
 	}
-	adminCert, err := certificates.GenerateSelfSignedForHosts(adminSANs...)
-	if err != nil {
-		slog.Error("failed to generate admin TLS certificate", "error", err)
-		os.Exit(1)
+	if _, err := certManager.EnsurePersistedCert(ctx, "localhost", adminSANs...); err != nil {
+		slog.Warn("certificates: could not prime admin cert", "error", err)
 	}
 
 	adminSrv := &http.Server{
-		Addr:    cfg.Server.AdminAddr,
-		Handler: mux,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{*adminCert},
-			MinVersion:   tls.VersionTLS12,
-			NextProtos:   []string{"h2", "http/1.1"},
-		},
+		Addr:         cfg.Server.AdminAddr,
+		Handler:      mux,
+		TLSConfig:    certManager.TLSConfig(),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,

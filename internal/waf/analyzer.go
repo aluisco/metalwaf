@@ -62,7 +62,11 @@ func Extract(r *http.Request) *Fields {
 			buf, _ := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
 			// Reconstruct: buf already read + whatever remains in the original stream.
 			r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buf), r.Body))
-			body = string(buf)
+			// Sniff the content: if binary bytes are detected (null bytes, PE header, etc.)
+			// skip WAF inspection to avoid false positives on binary uploads.
+			if !hasBinaryContent(buf) {
+				body = string(buf)
+			}
 		}
 	}
 
@@ -93,7 +97,11 @@ func isBinaryMediaType(mt string) bool {
 	case strings.HasPrefix(mt, "image/"),
 		strings.HasPrefix(mt, "audio/"),
 		strings.HasPrefix(mt, "video/"),
-		strings.HasPrefix(mt, "application/vnd."):
+		strings.HasPrefix(mt, "application/vnd."),
+		strings.HasPrefix(mt, "application/x-ms"),
+		strings.HasPrefix(mt, "application/x-dos"),
+		strings.HasPrefix(mt, "application/x-exe"),
+		strings.HasPrefix(mt, "application/x-pe-"):
 		return true
 	}
 	switch mt {
@@ -105,10 +113,33 @@ func isBinaryMediaType(mt string) bool {
 		"application/gzip",
 		"application/x-gzip",
 		"application/x-7z-compressed",
-		"application/x-rar-compressed":
+		"application/x-rar-compressed",
+		"application/x-executable",
+		"application/x-dosexec",
+		"application/x-msdos-program",
+		"application/x-msdownload",
+		"application/x-winexe":
 		return true
 	}
 	return false
+}
+
+// hasBinaryContent sniffs the first 512 bytes of data to detect binary content
+// (null bytes are a reliable indicator of non-text data).
+// Uses Go's http.DetectContentType as a secondary check.
+func hasBinaryContent(data []byte) bool {
+	sniff := data
+	if len(sniff) > 512 {
+		sniff = sniff[:512]
+	}
+	for _, b := range sniff {
+		if b == 0x00 {
+			return true
+		}
+	}
+	ct := http.DetectContentType(sniff)
+	mt, _, _ := mime.ParseMediaType(ct)
+	return isBinaryMediaType(mt)
 }
 
 // extractMultipartText parses a multipart/form-data body and returns only the

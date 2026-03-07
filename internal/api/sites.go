@@ -407,9 +407,9 @@ func validateSiteInput(name, domain, wafMode string) error {
 		return errors.New("domain must be 253 characters or fewer")
 	}
 	switch wafMode {
-	case "block", "detect", "off":
+	case "protect", "monitor", "off":
 	default:
-		return errors.New(`waf_mode must be "block", "detect", or "off"`)
+		return errors.New(`waf_mode must be "protect", "monitor", or "off"`)
 	}
 	return nil
 }

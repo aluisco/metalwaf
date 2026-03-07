@@ -53,8 +53,11 @@ func TestHandler_SiteNotFound(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 }
 
@@ -73,8 +76,8 @@ func TestHandler_DisabledSiteNotFound(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("disabled site: status = %d, want 404", rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Errorf("disabled site: status = %d, want 200", rr.Code)
 	}
 }
 
